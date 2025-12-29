@@ -27,17 +27,19 @@ export class WebServer {
         this.app.use((req, res, next) => {
             const ip = req.ip || req.socket.remoteAddress;
             // Ignorer les requêtes de fichiers statiques pour ne pas spammer les logs
-            if (!req.url.match(/\.(js|css|png|jpg|ico)$/)) {
+            if (!req.url.match(/\.(js|css|png|jpg|ico|svg|woff|woff2)$/)) {
                 this.onDidReceiveConnection.fire(`Request: ${req.method} ${req.url}`);
             }
             next();
         });
 
-        this.app.use(express.static(path.join(this.context.extensionPath, 'web')));
+        // Servir les fichiers statiques de Next.js depuis le dossier out
+        const staticPath = path.join(this.context.extensionPath, 'www', 'out');
+        this.app.use(express.static(staticPath));
 
-        // Route principale - page HTML
+        // Route pour la page principale
         this.app.get('/', (req, res) => {
-            res.sendFile(path.join(this.context.extensionPath, 'web', 'index.html'));
+            res.sendFile(path.join(staticPath, 'index.html'));
         });
 
         // API: Récupérer les modèles Copilot disponibles
