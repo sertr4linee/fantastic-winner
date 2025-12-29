@@ -1,0 +1,116 @@
+{
+  "name": "copilot-models-viewer",
+  "displayName": "Copilot Models Viewer",
+  "description": "Extension VS Code avec serveur web pour visualiser les modèles Copilot disponibles",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-models",
+          "title": "Copilot Models",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilot-models": [
+        {
+          "id": "copilotModelsView",
+          "name": "Server Control"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "copilot-models-viewer.openWebView",
+        "title": "Ouvrir l'interface web",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "copilot-models-viewer.startServer",
+        "title": "Démarrer le serveur",
+        "icon": "$(play)"
+      },
+      {
+        "command": "copilot-models-viewer.stopServer",
+        "title": "Arrêter le serveur",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "copilot-models-viewer.changePort",
+        "title": "Changer le port",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "copilot-models-viewer.refreshView",
+        "title": "Rafraîchir",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "copilot-models-viewer.refreshView",
+          "when": "view == copilotModelsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "copilot-models-viewer.openWebView",
+          "when": "view == copilotModelsView && viewItem == serverRunning",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Copilot Models Viewer",
+      "properties": {
+        "copilotModelsViewer.port": {
+          "type": "number",
+          "default": 60885,
+          "description": "Port du serveur web",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "copilotModelsViewer.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Démarrer automatiquement le serveur au lancement de VS Code"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  }
+}

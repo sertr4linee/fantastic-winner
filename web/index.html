@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copilot Models Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .status-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
+        .status-dot.disconnected {
+            background: #ef4444;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+            animation: none;
+        }
+
+        .status-dot.connecting {
+            background: #f59e0b;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .status-text {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .refresh-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .refresh-button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-button:active {
+            transform: translateY(0);
+        }
+
+        .refresh-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-message {
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            color: #991b1b;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            display: none;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
+
+        .error-message.show {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .error-message h3 {
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .models-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+        }
+
+        .model-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .model-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+
+        .model-card h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .model-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .model-info {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+
+        .info-value {
+            color: #1f2937;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            color: white;
+            padding: 60px 20px;
+        }
+
+        .empty-state h2 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .last-update {
+            color: #6b7280;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Copilot Models Viewer</h1>
+            <p>Visualisez tous les modèles Copilot disponibles en temps réel</p>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot connecting" id="statusDot"></div>
+                <span class="status-text" id="statusText">Connexion en cours...</span>
+                <span class="last-update" id="lastUpdate"></span>
+            </div>
+            <button class="refresh-button" id="refreshBtn" onclick="loadModels()">
+                🔄 Actualiser
+            </button>
+        </div>
+
+        <div class="error-message" id="errorMessage">
+            <h3>⚠️ Erreur de connexion</h3>
+            <p id="errorText">Impossible de se connecter au serveur VS Code. Vérifiez que l'extension est bien active.</p>
+        </div>
+
+        <div id="loadingSpinner" class="loading">
+            <div class="spinner"></div>
+            <p>Chargement des modèles...</p>
+        </div>
+
+        <div class="models-grid" id="modelsGrid"></div>
+
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <h2>Aucun modèle disponible</h2>
+            <p>Aucun modèle Copilot n'a été trouvé</p>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        let reconnectTimeout = null;
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            loadModels();
+        });
+
+        // Connexion WebSocket
+        function connectWebSocket() {
+            try {
+                // Utiliser le port actuel de la page
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host;
+                ws = new WebSocket(`${protocol}//${host}/ws`);
+
+                ws.onopen = () => {
+                    console.log('WebSocket connecté');
+                    reconnectAttempts = 0;
+                    updateStatus('connected', 'Connecté à VS Code');
+                    hideError();
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('Message reçu:', data);
+
+                        if (data.type === 'models') {
+                            displayModels(data.data);
+                        } else if (data.type === 'heartbeat') {
+                            // Mise à jour silencieuse du status
+                            updateLastUpdate();
+                        }
+                    } catch (error) {
+                        console.error('Erreur parsing message:', error);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('Erreur WebSocket:', error);
+                    updateStatus('disconnected', 'Erreur de connexion');
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket déconnecté');
+                    updateStatus('disconnected', 'Déconnecté de VS Code');
+                    showError('La connexion avec VS Code a été perdue. Tentative de reconnexion...');
+                    
+                    // Tentative de reconnexion
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        updateStatus('connecting', `Reconnexion (${reconnectAttempts}/${maxReconnectAttempts})...`);
+                        reconnectTimeout = setTimeout(() => {
+                            connectWebSocket();
+                        }, 3000 * reconnectAttempts);
+                    } else {
+                        showError('Impossible de se reconnecter à VS Code. Veuillez vérifier que l\'extension est active.');
+                    }
+                };
+            } catch (error) {
+                console.error('Erreur création WebSocket:', error);
+                updateStatus('disconnected', 'Impossible de se connecter');
+                showError('Impossible de créer la connexion WebSocket.');
+            }
+        }
+
+        // Charger les modèles via HTTP
+        async function loadModels() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.disabled = true;
+            showLoading();
+
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+
+                if (data.success) {
+                    displayModels(data.models);
+                    updateLastUpdate(data.timestamp);
+                    hideError();
+                } else {
+                    throw new Error(data.error || 'Erreur inconnue');
+                }
+            } catch (error) {
+                console.error('Erreur chargement modèles:', error);
+                showError('Erreur lors du chargement des modèles: ' + error.message);
+                showEmptyState();
+            } finally {
+                hideLoading();
+                refreshBtn.disabled = false;
+            }
+        }
+
+        // Afficher les modèles
+        function displayModels(models) {
+            const grid = document.getElementById('modelsGrid');
+            const emptyState = document.getElementById('emptyState');
+
+            if (!models || models.length === 0) {
+                showEmptyState();
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            grid.innerHTML = '';
+
+            models.forEach((model, index) => {
+                const card = document.createElement('div');
+                card.className = 'model-card';
+                card.style.animationDelay = `${index * 0.1}s`;
+                
+                card.innerHTML = `
+                    <h3>
+                        ${escapeHtml(model.name || model.id)}
+                        <span class="model-badge">${escapeHtml(model.vendor || 'N/A')}</span>
+                    </h3>
+                    <div class="model-info">
+                        <div class="info-row">
+                            <span class="info-label">ID</span>
+                            <span class="info-value">${escapeHtml(model.id)}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Famille</span>
+                            <span class="info-value">${escapeHtml(model.family || 'N/A')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Version</span>
+                            <span class="info-value">${escapeHtml(model.version || 'N/A')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Max Tokens</span>
+                            <span class="info-value">${formatNumber(model.maxInputTokens)}</span>
+                        </div>
+                    </div>
+                `;
+                
+                grid.appendChild(card);
+            });
+        }
+
+        // Mise à jour du status
+        function updateStatus(status, text) {
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            dot.className = `status-dot ${status}`;
+            statusText.textContent = text;
+        }
+
+        // Afficher/masquer erreur
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            const errorText = document.getElementById('errorText');
+            errorText.textContent = message;
+            errorDiv.classList.add('show');
+        }
+
+        function hideError() {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.classList.remove('show');
+        }
+
+        // Loading
+        function showLoading() {
+            document.getElementById('loadingSpinner').style.display = 'block';
+            document.getElementById('modelsGrid').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingSpinner').style.display = 'none';
+            document.getElementById('modelsGrid').style.display = 'grid';
+        }
+
+        function showEmptyState() {
+            document.getElementById('modelsGrid').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'block';
+        }
+
+        // Mise à jour du dernier update
+        function updateLastUpdate(timestamp) {
+            const lastUpdate = document.getElementById('lastUpdate');
+            const date = timestamp ? new Date(timestamp) : new Date();
+            lastUpdate.textContent = `Dernière mise à jour: ${date.toLocaleTimeString('fr-FR')}`;
+        }
+
+        // Utilitaires
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatNumber(num) {
+            if (num === undefined || num === null) return 'N/A';
+            return num.toLocaleString('fr-FR');
+        }
+
+        // Nettoyage
+        window.addEventListener('beforeunload', () => {
+            if (ws) {
+                ws.close();
+            }
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+        });
+    </script>
+</body>
+</html>
