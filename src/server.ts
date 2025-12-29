@@ -3,6 +3,7 @@ import express from 'express';
 import * as http from 'http';
 import * as path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
+import { CopilotChatManager } from './copilotChat';
 
 export class WebServer {
     private app: express.Application;
@@ -46,10 +47,24 @@ export class WebServer {
         this.app.get('/api/models', async (req, res) => {
             try {
                 const models = await this.getCopilotModels();
+                
+                // Marquer les modèles qui sont des "agents" (peuvent être utilisés dans le chat)
+                const modelsWithTypes = models.map(model => ({
+                    ...model,
+                    isAgent: model.id.includes('gpt') || model.id.includes('claude') || model.id.includes('o1'), // Les modèles agents typiques
+                    capabilities: {
+                        chat: true,
+                        code: model.id.includes('gpt') || model.id.includes('claude'),
+                        streaming: true
+                    }
+                }));
+                
                 res.json({
                     success: true,
-                    models: models,
-                    timestamp: new Date().toISOString()
+                    models: modelsWithTypes,
+                    timestamp: new Date().toISOString(),
+                    totalCount: modelsWithTypes.length,
+                    agentCount: modelsWithTypes.filter(m => m.isAgent).length
                 });
             } catch (error: any) {
                 res.status(500).json({
@@ -135,6 +150,83 @@ export class WebServer {
                 res.status(500).json({
                     success: false,
                     error: error.message || 'Error detecting projects'
+                });
+            }
+        });
+
+        // API: Ouvrir le message dans le vrai panel Copilot de VS Code
+        this.app.post('/api/copilot/open', async (req, res) => {
+            try {
+                const { message } = req.body;
+
+                if (!message) {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'No message provided'
+                    });
+                }
+
+                const copilotManager = CopilotChatManager.getInstance();
+                
+                // Vérifier si Copilot est disponible
+                const isAvailable = await copilotManager.isCopilotAvailable();
+                if (!isAvailable) {
+                    return res.status(503).json({
+                        success: false,
+                        error: 'Copilot is not installed or not available'
+                    });
+                }
+
+                // Ouvrir le panel Copilot avec le message
+                await copilotManager.openCopilotWithMessage(message);
+
+                res.json({
+                    success: true,
+                    message: 'Copilot panel opened with message'
+                });
+            } catch (error: any) {
+                console.error('Error opening Copilot:', error);
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error opening Copilot'
+                });
+            }
+        });
+
+        // API: Créer une nouvelle conversation Copilot
+        this.app.post('/api/copilot/new', async (req, res) => {
+            try {
+                const copilotManager = CopilotChatManager.getInstance();
+                await copilotManager.createNewChat();
+
+                res.json({
+                    success: true,
+                    message: 'New Copilot chat created'
+                });
+            } catch (error: any) {
+                console.error('Error creating new chat:', error);
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error creating new chat'
+                });
+            }
+        });
+
+        // API: Vérifier le statut de Copilot
+        this.app.get('/api/copilot/status', async (req, res) => {
+            try {
+                const copilotManager = CopilotChatManager.getInstance();
+                const isAvailable = await copilotManager.isCopilotAvailable();
+
+                res.json({
+                    success: true,
+                    copilotAvailable: isAvailable,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error: any) {
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error checking Copilot status'
                 });
             }
         });

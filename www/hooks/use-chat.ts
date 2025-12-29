@@ -42,15 +42,22 @@ export function useChat(options: UseChatOptions = {}) {
       abortControllerRef.current = new AbortController();
 
       try {
-        // Get current messages and prepare for API
-        let apiMessages: Array<{ role: string; content: string }> = [];
+        // Build the complete messages array BEFORE updating state
+        const allMessages = [...messages, userMessage];
         
-        setMessages((prev) => {
-          apiMessages = [...prev, userMessage].map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-          }));
-          return [...prev, userMessage];
+        // Update state with new messages
+        setMessages(allMessages);
+
+        // Prepare messages for API (convert to simple format)
+        const apiMessages = allMessages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+
+        console.log('[useChat] Sending request with:', {
+          messagesCount: apiMessages.length,
+          modelId,
+          messages: apiMessages
         });
 
         const response = await fetch("/api/chat", {
@@ -66,8 +73,12 @@ export function useChat(options: UseChatOptions = {}) {
           signal: abortControllerRef.current.signal,
         });
 
+        console.log('[useChat] Response status:', response.status);
+
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          const errorText = await response.text().catch(() => 'Unknown error');
+          console.error('[useChat] Error response:', errorText);
+          throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
         }
 
         // Create assistant message

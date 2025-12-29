@@ -122,6 +122,7 @@ const Example = () => {
   >("ready");
   const [wsStatus, setWsStatus] = useState<WSConnectionStatus>("connecting");
   const [currentPath, setCurrentPath] = useState<string>("");
+  const [isDevMode, setIsDevMode] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -160,10 +161,20 @@ const Example = () => {
           if (data.currentPath) {
             setCurrentPath(data.currentPath);
           }
+          // Check if we're in development mode
+          setIsDevMode(data.isDevelopmentMode || false);
+          
+          // Update WS status based on API response
+          if (data.status === "standalone") {
+            setWsStatus("disconnected");
+          } else if (data.status === "connected") {
+            setWsStatus("connected");
+          }
         }
       } catch (err) {
         console.error("Failed to fetch path:", err);
         setCurrentPath("Not connected");
+        setWsStatus("disconnected");
       }
     };
 
@@ -194,8 +205,14 @@ const Example = () => {
           });
           setModels(sortedModels);
           if (sortedModels.length > 0) {
-            setModel(sortedModels[0].id);
+            const firstModelId = sortedModels[0].id;
+            console.log('[Models] Setting default model:', firstModelId);
+            setModel(firstModelId);
+          } else {
+            console.warn('[Models] No models available');
           }
+          // Check if we're in dev mode based on API response
+          setIsDevMode(data.isDevelopmentMode || false);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -224,12 +241,21 @@ const Example = () => {
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
+    console.log('[handleSubmit] Called with:', {
+      hasText,
+      hasAttachments,
+      model,
+      messageLength: message.text?.length || 0
+    });
+
     if (!(hasText || hasAttachments)) {
+      console.warn('[handleSubmit] No text or attachments');
       return;
     }
 
     if (!model) {
-      console.error("No model selected");
+      console.error('[handleSubmit] No model selected. Available models:', models.length);
+      alert('Please select a model first. Refresh the page if no models are available.');
       return;
     }
 
@@ -240,6 +266,25 @@ const Example = () => {
     if (hasAttachments && message.files) {
       const fileNames = message.files.map((f: any) => f.name || f.fileName || "file").join(", ");
       fullMessage += `\n\n[Attachments: ${fileNames}]`;
+    }
+
+    // Si on est en mode extension VS Code, envoyer automatiquement au vrai Copilot
+    if (wsStatus === "connected" && !isDevMode) {
+      try {
+        // Envoyer au vrai chat Copilot de VS Code
+        const copilotResponse = await fetch("/api/copilot/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: fullMessage }),
+        });
+        
+        if (copilotResponse.ok) {
+          console.log("[Copilot] Message envoyé au chat Copilot de VS Code");
+          // Continuer pour afficher aussi dans notre interface
+        }
+      } catch (error) {
+        console.error("Failed to send to Copilot:", error);
+      }
     }
 
     setTimeout(() => {
@@ -263,22 +308,32 @@ const Example = () => {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Dev Mode Badge */}
+          {isDevMode && (
+            <div className="flex items-center gap-2 rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-2">
+              <AlertCircleIcon className="size-4 text-yellow-500" />
+              <span className="text-sm text-yellow-300">Mode Développement</span>
+            </div>
+          )}
+          
           {/* Connection Status */}
           <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
             {wsStatus === "connected" ? (
               <>
                 <WifiIcon className="size-4 text-green-500" />
-                <span className="text-sm text-zinc-300">Connected</span>
+                <span className="text-sm text-zinc-300">
+                  {isDevMode ? "Simulé" : "Connecté"}
+                </span>
               </>
             ) : wsStatus === "connecting" ? (
               <>
                 <RefreshCwIcon className="size-4 animate-spin text-yellow-500" />
-                <span className="text-sm text-zinc-300">Connecting...</span>
+                <span className="text-sm text-zinc-300">Connexion...</span>
               </>
             ) : (
               <>
                 <WifiOffIcon className="size-4 text-red-500" />
-                <span className="text-sm text-zinc-300">Disconnected</span>
+                <span className="text-sm text-zinc-300">Déconnecté</span>
               </>
             )}
           </div>
@@ -300,9 +355,11 @@ const Example = () => {
           <div className="mx-auto mb-6 flex w-full max-w-4xl items-center gap-3 rounded-lg border border-red-900/50 bg-red-950/20 p-4 text-red-200">
             <AlertCircleIcon className="size-5" />
             <div>
-              <p className="font-medium">NOT CONNECTED</p>
+              <p className="font-medium">MODE DÉVELOPPEMENT</p>
               <p className="text-sm">
-                Check your IDE and click on the extension button to restart
+                {isDevMode 
+                  ? "Les réponses sont simulées. Lancez l'extension VS Code pour utiliser les vrais modèles Copilot."
+                  : "Non connecté. Cliquez sur le bouton de l'extension dans votre IDE pour redémarrer."}
               </p>
             </div>
           </div>
