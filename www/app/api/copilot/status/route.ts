@@ -20,53 +20,41 @@ async function findExpressUrl(): Promise<string | null> {
   return null;
 }
 
-export async function POST(request: Request) {
+export async function GET() {
   try {
-    const body = await request.json();
-    const { message, modelId } = body;
-    
     const expressUrl = await findExpressUrl();
 
     if (!expressUrl) {
       return NextResponse.json(
         {
           success: false,
-          status: "error",
-          error: "VS Code extension server not found. Make sure the extension is running.",
+          copilotAvailable: false,
+          error: "VS Code extension server not found",
         },
         { status: 503 }
       );
     }
 
-    // Redirect to Express server with message and modelId
-    const expressResponse = await fetch(`${expressUrl}/api/copilot/new`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ message, modelId }),
-    });
-
-    if (!expressResponse.ok) {
-      const errorData = await expressResponse.json().catch(() => ({}));
+    const response = await fetch(`${expressUrl}/api/copilot/status`);
+    
+    if (!response.ok) {
       return NextResponse.json(
         {
           success: false,
-          status: "error",
-          error: errorData.error || "Failed to create new Copilot chat",
+          copilotAvailable: false,
+          error: "Failed to get Copilot status",
         },
-        { status: expressResponse.status }
+        { status: response.status }
       );
     }
 
-    const data = await expressResponse.json();
+    const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error creating new Copilot chat:", error);
     return NextResponse.json(
       {
         success: false,
-        status: "error",
+        copilotAvailable: false,
         error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }

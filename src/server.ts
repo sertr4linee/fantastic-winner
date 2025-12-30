@@ -49,15 +49,30 @@ export class WebServer {
                 const models = await this.getCopilotModels();
                 
                 // Marquer les modèles qui sont des "agents" (peuvent être utilisés dans le chat)
-                const modelsWithTypes = models.map(model => ({
-                    ...model,
-                    isAgent: model.id.includes('gpt') || model.id.includes('claude') || model.id.includes('o1'), // Les modèles agents typiques
-                    capabilities: {
-                        chat: true,
-                        code: model.id.includes('gpt') || model.id.includes('claude'),
-                        streaming: true
-                    }
-                }));
+                const modelsWithTypes = models.map(model => {
+                    const modelId = model.id.toLowerCase();
+                    const modelName = model.name?.toLowerCase() || '';
+                    
+                    // Détecter les modèles agents (ceux qui peuvent faire du chat)
+                    const isAgent = 
+                        modelId.includes('gpt') || 
+                        modelId.includes('claude') || 
+                        modelId.includes('o1') ||
+                        modelId.includes('o3') ||
+                        modelName.includes('copilot') ||
+                        modelName.includes('agent') ||
+                        model.family?.toLowerCase().includes('agent');
+                    
+                    return {
+                        ...model,
+                        isAgent,
+                        capabilities: {
+                            chat: true,
+                            code: isAgent,
+                            streaming: true
+                        }
+                    };
+                });
                 
                 res.json({
                     success: true,
@@ -154,10 +169,10 @@ export class WebServer {
             }
         });
 
-        // API: Ouvrir le message dans le vrai panel Copilot de VS Code
-        this.app.post('/api/copilot/open', async (req, res) => {
+        // API: Envoyer un prompt au Copilot (workflow amélioré)
+        this.app.post('/api/copilot/send', async (req, res) => {
             try {
-                const { message } = req.body;
+                const { message, modelId } = req.body;
 
                 if (!message) {
                     return res.status(400).json({
@@ -177,12 +192,55 @@ export class WebServer {
                     });
                 }
 
-                // Ouvrir le panel Copilot avec le message
-                await copilotManager.openCopilotWithMessage(message);
+                // Envoyer le prompt via le nouveau workflow
+                const result = await copilotManager.sendPromptToCopilot(message, modelId);
 
                 res.json({
-                    success: true,
-                    message: 'Copilot panel opened with message'
+                    success: result.success,
+                    status: result.status,
+                    message: result.message,
+                    error: result.error,
+                    modelId: result.modelId
+                });
+            } catch (error: any) {
+                console.error('Error sending to Copilot:', error);
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error sending to Copilot'
+                });
+            }
+        });
+
+        // API: Ouvrir le message dans le vrai panel Copilot de VS Code (legacy)
+        this.app.post('/api/copilot/open', async (req, res) => {
+            try {
+                const { message, modelId } = req.body;
+
+                if (!message) {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'No message provided'
+                    });
+                }
+
+                const copilotManager = CopilotChatManager.getInstance();
+                
+                // Vérifier si Copilot est disponible
+                const isAvailable = await copilotManager.isCopilotAvailable();
+                if (!isAvailable) {
+                    return res.status(503).json({
+                        success: false,
+                        error: 'Copilot is not installed or not available'
+                    });
+                }
+
+                // Utiliser le nouveau workflow
+                const result = await copilotManager.sendPromptToCopilot(message, modelId);
+
+                res.json({
+                    success: result.success,
+                    status: result.status,
+                    message: result.message || 'Copilot panel opened with message'
                 });
             } catch (error: any) {
                 console.error('Error opening Copilot:', error);
@@ -193,21 +251,106 @@ export class WebServer {
             }
         });
 
-        // API: Créer une nouvelle conversation Copilot
+        // API: Créer une nouvelle conversation Copilot et envoyer un prompt
         this.app.post('/api/copilot/new', async (req, res) => {
             try {
+                const { message, modelId } = req.body;
                 const copilotManager = CopilotChatManager.getInstance();
+                
+                // Créer un nouveau chat
                 await copilotManager.createNewChat();
+
+                // Si un message est fourni, l'envoyer via le nouveau workflow
+                if (message) {
+                    // Attendre que le nouveau chat soit prêt
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    const result = await copilotManager.sendPromptToCopilot(message, modelId);
+                    
+                    return res.json({
+                        success: result.success,
+                        status: result.status,
+                        message: 'New chat created' + (result.success ? ' and prompt sent' : ''),
+                        error: result.error,
+                        modelId: result.modelId
+                    });
+                }
 
                 res.json({
                     success: true,
+                    status: 'done',
                     message: 'New Copilot chat created'
                 });
             } catch (error: any) {
                 console.error('Error creating new chat:', error);
                 res.status(500).json({
                     success: false,
+                    status: 'error',
                     error: error.message || 'Error creating new chat'
+                });
+            }
+        });
+
+        // API: Obtenir le statut du traitement en cours
+        this.app.get('/api/copilot/processing-status', async (req, res) => {
+            try {
+                const copilotManager = CopilotChatManager.getInstance();
+                const status = copilotManager.getStatus();
+
+                res.json({
+                    success: true,
+                    ...status,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error: any) {
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error getting processing status'
+                });
+            }
+        });
+
+        // API: Changer le modèle Copilot
+        // Note: VS Code n'a pas d'API pour changer le modèle dans le panel Copilot UI
+        // Cette API vérifie juste que le modèle est disponible pour utilisation via vscode.lm
+        this.app.post('/api/copilot/set-model', async (req, res) => {
+            try {
+                const { modelId } = req.body;
+
+                if (!modelId) {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'No model ID provided'
+                    });
+                }
+
+                const copilotManager = CopilotChatManager.getInstance();
+                
+                // Vérifier si Copilot est disponible
+                const isAvailable = await copilotManager.isCopilotAvailable();
+                if (!isAvailable) {
+                    return res.status(503).json({
+                        success: false,
+                        error: 'Copilot is not installed or not available'
+                    });
+                }
+
+                // Vérifier que le modèle est disponible
+                const success = await copilotManager.setCopilotModel(modelId);
+
+                res.json({
+                    success: success,
+                    modelId: modelId,
+                    message: success 
+                        ? `Model ${modelId} is available and will be used for chat requests` 
+                        : `Model ${modelId} is not available`,
+                    note: 'The model is used via the vscode.lm API directly. The Copilot Chat panel uses its own model selector.',
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error: any) {
+                console.error('Error setting Copilot model:', error);
+                res.status(500).json({
+                    success: false,
+                    error: error.message || 'Error setting Copilot model'
                 });
             }
         });
@@ -217,10 +360,12 @@ export class WebServer {
             try {
                 const copilotManager = CopilotChatManager.getInstance();
                 const isAvailable = await copilotManager.isCopilotAvailable();
+                const processingStatus = copilotManager.getStatus();
 
                 res.json({
                     success: true,
                     copilotAvailable: isAvailable,
+                    isProcessing: processingStatus.isProcessing,
                     timestamp: new Date().toISOString()
                 });
             } catch (error: any) {

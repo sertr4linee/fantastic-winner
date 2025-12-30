@@ -23,28 +23,37 @@ async function findExpressUrl(): Promise<string | null> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, modelId } = body;
+    const { modelId } = body;
     
+    if (!modelId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "No model ID provided",
+        },
+        { status: 400 }
+      );
+    }
+
     const expressUrl = await findExpressUrl();
 
     if (!expressUrl) {
       return NextResponse.json(
         {
           success: false,
-          status: "error",
           error: "VS Code extension server not found. Make sure the extension is running.",
         },
         { status: 503 }
       );
     }
 
-    // Redirect to Express server with message and modelId
-    const expressResponse = await fetch(`${expressUrl}/api/copilot/new`, {
+    // Envoyer au serveur Express
+    const expressResponse = await fetch(`${expressUrl}/api/copilot/set-model`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message, modelId }),
+      body: JSON.stringify({ modelId }),
     });
 
     if (!expressResponse.ok) {
@@ -52,8 +61,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          status: "error",
-          error: errorData.error || "Failed to create new Copilot chat",
+          error: errorData.error || "Failed to set Copilot model",
         },
         { status: expressResponse.status }
       );
@@ -62,11 +70,10 @@ export async function POST(request: Request) {
     const data = await expressResponse.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error creating new Copilot chat:", error);
+    console.error("Error setting Copilot model:", error);
     return NextResponse.json(
       {
         success: false,
-        status: "error",
         error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }

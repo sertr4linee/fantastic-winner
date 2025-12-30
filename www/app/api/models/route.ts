@@ -38,6 +38,12 @@ const MOCK_MODELS = [
     version: "0613",
     vendor: "OpenAI",
     maxInputTokens: 8192,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "gpt-4-turbo",
@@ -46,6 +52,12 @@ const MOCK_MODELS = [
     version: "turbo",
     vendor: "OpenAI",
     maxInputTokens: 128000,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "gpt-3.5-turbo",
@@ -54,6 +66,12 @@ const MOCK_MODELS = [
     version: "0125",
     vendor: "OpenAI",
     maxInputTokens: 16385,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "claude-3-opus",
@@ -62,6 +80,12 @@ const MOCK_MODELS = [
     version: "opus",
     vendor: "Anthropic",
     maxInputTokens: 200000,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "claude-3-sonnet",
@@ -70,6 +94,12 @@ const MOCK_MODELS = [
     version: "sonnet",
     vendor: "Anthropic",
     maxInputTokens: 200000,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "claude-3-haiku",
@@ -78,6 +108,12 @@ const MOCK_MODELS = [
     version: "haiku",
     vendor: "Anthropic",
     maxInputTokens: 200000,
+    isAgent: true,
+    capabilities: {
+      chat: true,
+      code: true,
+      streaming: true,
+    },
   },
   {
     id: "gemini-pro",
@@ -86,6 +122,12 @@ const MOCK_MODELS = [
     version: "pro",
     vendor: "Google",
     maxInputTokens: 32768,
+    isAgent: false,
+    capabilities: {
+      chat: true,
+      code: false,
+      streaming: true,
+    },
   },
   {
     id: "mistral-large",
@@ -94,6 +136,12 @@ const MOCK_MODELS = [
     version: "large",
     vendor: "Mistral",
     maxInputTokens: 32000,
+    isAgent: false,
+    capabilities: {
+      chat: true,
+      code: false,
+      streaming: true,
+    },
   },
 ];
 

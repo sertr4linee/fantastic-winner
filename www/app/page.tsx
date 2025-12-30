@@ -45,9 +45,14 @@ import {
   WifiIcon,
   WifiOffIcon,
   StopCircleIcon,
-  TrashIcon
+  TrashIcon,
+  ClipboardCopyIcon,
+  SendIcon,
+  Loader2Icon,
+  SparklesIcon,
+  RocketIcon
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 type CopilotModel = {
   id: string;
@@ -56,9 +61,16 @@ type CopilotModel = {
   version: string;
   vendor: string;
   maxInputTokens: number;
+  isAgent?: boolean;
+  capabilities?: {
+    chat: boolean;
+    code: boolean;
+    streaming: boolean;
+  };
 };
 
 type WSConnectionStatus = "connected" | "connecting" | "disconnected";
+type PromptStatus = "idle" | "copying" | "pasting" | "waiting" | "done" | "error";
 
 const SUBMITTING_TIMEOUT = 200;
 const STREAMING_TIMEOUT = 2000;
@@ -120,9 +132,12 @@ const Example = () => {
   const [status, setStatus] = useState<
     "submitted" | "streaming" | "ready" | "error"
   >("ready");
+  const [promptStatus, setPromptStatus] = useState<PromptStatus>("idle");
+  const [lastPromptMessage, setLastPromptMessage] = useState<string>("");
   const [wsStatus, setWsStatus] = useState<WSConnectionStatus>("connecting");
   const [currentPath, setCurrentPath] = useState<string>("");
   const [isDevMode, setIsDevMode] = useState<boolean>(false);
+  const [copilotAvailable, setCopilotAvailable] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -150,7 +165,7 @@ const Example = () => {
     return () => {};
   }, []);
 
-  // Fetch current working directory
+  // Fetch current working directory and Copilot status
   useEffect(() => {
     const fetchPath = async () => {
       try {
@@ -170,6 +185,13 @@ const Example = () => {
           } else if (data.status === "connected") {
             setWsStatus("connected");
           }
+        }
+        
+        // Check Copilot availability
+        const copilotResponse = await fetch("/api/copilot/status");
+        if (copilotResponse.ok) {
+          const copilotData = await copilotResponse.json();
+          setCopilotAvailable(copilotData.copilotAvailable || false);
         }
       } catch (err) {
         console.error("Failed to fetch path:", err);
@@ -227,6 +249,9 @@ const Example = () => {
 
   const selectedModelData = models.find((m) => m.id === model);
 
+  // Filter only agent models for selection
+  const agentModels = models.filter((m) => m.isAgent);
+
   // Group models by vendor
   const groupedModels = models.reduce((acc, model) => {
     const vendor = model.vendor || "Other";
@@ -236,6 +261,13 @@ const Example = () => {
     acc[vendor].push(model);
     return acc;
   }, {} as Record<string, CopilotModel[]>);
+
+  // Handler pour le changement de modèle
+  const handleModelChange = useCallback((newModelId: string) => {
+    console.log('[Model Change] Changing model to:', newModelId);
+    setModel(newModelId);
+    setModelSelectorOpen(false);
+  }, []);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -259,39 +291,52 @@ const Example = () => {
       return;
     }
 
-    setStatus("submitted");
-
-    // Handle attachments in the future
+    // Build full message
     let fullMessage = message.text || "";
     if (hasAttachments && message.files) {
       const fileNames = message.files.map((f: any) => f.name || f.fileName || "file").join(", ");
       fullMessage += `\n\n[Attachments: ${fileNames}]`;
     }
 
-    // Si on est en mode extension VS Code, envoyer automatiquement au vrai Copilot
-    if (wsStatus === "connected" && !isDevMode) {
+    setStatus("submitted");
+    setLastPromptMessage(fullMessage);
+
+    // Si Copilot est disponible et on est connecté, envoyer aussi au panel Copilot natif
+    if (copilotAvailable && wsStatus === "connected") {
       try {
-        // Envoyer au vrai chat Copilot de VS Code
-        const copilotResponse = await fetch("/api/copilot/open", {
+        setPromptStatus("copying");
+        
+        // Envoyer au panel Copilot natif de VS Code
+        const copilotResponse = await fetch("/api/copilot/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: fullMessage }),
+          body: JSON.stringify({ message: fullMessage, modelId: model }),
         });
         
         if (copilotResponse.ok) {
-          console.log("[Copilot] Message envoyé au chat Copilot de VS Code");
-          // Continuer pour afficher aussi dans notre interface
+          const result = await copilotResponse.json();
+          console.log("[Copilot] Prompt envoyé au panel Copilot:", result);
+          setPromptStatus(result.status || "done");
+          
+          // Reset status after 3 seconds
+          setTimeout(() => setPromptStatus("idle"), 3000);
+        } else {
+          console.error("[Copilot] Failed to send to Copilot panel");
+          setPromptStatus("error");
+          setTimeout(() => setPromptStatus("idle"), 3000);
         }
       } catch (error) {
         console.error("Failed to send to Copilot:", error);
+        setPromptStatus("error");
+        setTimeout(() => setPromptStatus("idle"), 3000);
       }
     }
 
+    // Envoyer aussi via notre API de chat pour afficher dans notre interface
     setTimeout(() => {
       setStatus("streaming");
     }, SUBMITTING_TIMEOUT);
 
-    // Send message to chat
     await sendMessage(fullMessage, model);
   };
 
@@ -308,11 +353,19 @@ const Example = () => {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Copilot Status */}
+          {copilotAvailable && (
+            <div className="flex items-center gap-2 rounded-lg border border-green-800 bg-green-950/30 px-3 py-2">
+              <SparklesIcon className="size-4 text-green-500" />
+              <span className="text-sm text-green-300">Copilot Ready</span>
+            </div>
+          )}
+          
           {/* Dev Mode Badge */}
           {isDevMode && (
             <div className="flex items-center gap-2 rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-2">
               <AlertCircleIcon className="size-4 text-yellow-500" />
-              <span className="text-sm text-yellow-300">Mode Développement</span>
+              <span className="text-sm text-yellow-300">Mode Dev</span>
             </div>
           )}
           
@@ -351,6 +404,63 @@ const Example = () => {
       </header>
       
       <main className="flex flex-1 flex-col p-6">
+        {/* Prompt Status Indicator */}
+        {promptStatus !== "idle" && (
+          <div className={`mx-auto mb-6 flex w-full max-w-4xl items-center gap-3 rounded-lg border p-4 transition-all duration-300 ${
+            promptStatus === "copying" ? "border-blue-800 bg-blue-950/30 text-blue-200" :
+            promptStatus === "pasting" ? "border-purple-800 bg-purple-950/30 text-purple-200" :
+            promptStatus === "waiting" ? "border-yellow-800 bg-yellow-950/30 text-yellow-200" :
+            promptStatus === "done" ? "border-green-800 bg-green-950/30 text-green-200" :
+            "border-red-800 bg-red-950/30 text-red-200"
+          }`}>
+            {promptStatus === "copying" && (
+              <>
+                <ClipboardCopyIcon className="size-5 animate-pulse" />
+                <div>
+                  <p className="font-medium">📋 Copie dans le presse-papier...</p>
+                  <p className="text-sm opacity-70">Préparation du prompt</p>
+                </div>
+              </>
+            )}
+            {promptStatus === "pasting" && (
+              <>
+                <SendIcon className="size-5 animate-pulse" />
+                <div>
+                  <p className="font-medium">🚀 Envoi au Copilot...</p>
+                  <p className="text-sm opacity-70">Collage dans le chat VS Code</p>
+                </div>
+              </>
+            )}
+            {promptStatus === "waiting" && (
+              <>
+                <Loader2Icon className="size-5 animate-spin" />
+                <div>
+                  <p className="font-medium">⏳ En attente de réponse...</p>
+                  <p className="text-sm opacity-70">Copilot traite votre demande</p>
+                </div>
+              </>
+            )}
+            {promptStatus === "done" && (
+              <>
+                <CheckIcon className="size-5" />
+                <div>
+                  <p className="font-medium">✅ Prompt envoyé avec succès!</p>
+                  <p className="text-sm opacity-70">Vérifiez le chat Copilot dans VS Code</p>
+                </div>
+              </>
+            )}
+            {promptStatus === "error" && (
+              <>
+                <AlertCircleIcon className="size-5" />
+                <div>
+                  <p className="font-medium">❌ Erreur d'envoi</p>
+                  <p className="text-sm opacity-70">Impossible d'envoyer au Copilot</p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {wsStatus === "disconnected" && (
           <div className="mx-auto mb-6 flex w-full max-w-4xl items-center gap-3 rounded-lg border border-red-900/50 bg-red-950/20 p-4 text-red-200">
             <AlertCircleIcon className="size-5" />
@@ -366,9 +476,17 @@ const Example = () => {
         )}
 
         <div className="mx-auto w-full max-w-4xl text-center">
-          <h2 className="mb-8 font-bold text-4xl text-white">
+          <h2 className="mb-2 font-bold text-4xl text-white">
             What will you build today?
           </h2>
+          
+          {/* Selected Model Display */}
+          {selectedModelData && (
+            <p className="mb-6 text-sm text-zinc-500">
+              Using <span className="font-semibold text-zinc-300">{selectedModelData.name}</span> 
+              {selectedModelData.isAgent && <span className="ml-1 text-green-500">• Agent Mode</span>}
+            </p>
+          )}
 
           {/* Chat Messages */}
           {messages.length > 0 && (
@@ -487,33 +605,86 @@ const Example = () => {
                         <ModelSelectorEmpty>
                           {error ? `Error: ${error}` : "No models found."}
                         </ModelSelectorEmpty>
-                        {Object.keys(groupedModels).sort().map((vendor) => (
-                          <ModelSelectorGroup heading={vendor} key={vendor}>
-                            {groupedModels[vendor].map((m) => (
-                              <ModelSelectorItem
-                                key={m.id}
-                                onSelect={() => {
-                                  setModel(m.id);
-                                  setModelSelectorOpen(false);
-                                }}
-                                value={m.id}
-                              >
-                                <ModelSelectorLogo
-                                  provider={m.vendor.toLowerCase()}
-                                />
-                                <div className="flex flex-1 flex-col items-start">
-                                  <ModelSelectorName>{m.name}</ModelSelectorName>
-                                  <span className="text-muted-foreground text-xs">
-                                    {m.family} • {m.version}
-                                  </span>
-                                </div>
-                                {model === m.id && (
-                                  <CheckIcon className="ml-2 size-4 text-green-500" />
-                                )}
-                              </ModelSelectorItem>
-                            ))}
-                          </ModelSelectorGroup>
-                        ))}
+                        
+                        {/* Modèles Agents (pour le chat) */}
+                        {Object.keys(groupedModels).some(vendor => 
+                          groupedModels[vendor].some(m => m.isAgent)
+                        ) && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-zinc-400">
+                              🤖 CHAT AGENTS
+                            </div>
+                            {Object.keys(groupedModels).sort().map((vendor) => {
+                              const agentModels = groupedModels[vendor].filter(m => m.isAgent);
+                              if (agentModels.length === 0) return null;
+                              
+                              return (
+                                <ModelSelectorGroup heading={vendor} key={`agent-${vendor}`}>
+                                  {agentModels.map((m) => (
+                                    <ModelSelectorItem
+                                      key={m.id}
+                                      onSelect={() => handleModelChange(m.id)}
+                                      value={m.id}
+                                    >
+                                      <ModelSelectorLogo
+                                        provider={m.vendor.toLowerCase()}
+                                      />
+                                      <div className="flex flex-1 flex-col items-start">
+                                        <ModelSelectorName>{m.name}</ModelSelectorName>
+                                        <span className="text-muted-foreground text-xs">
+                                          {m.family} • {m.version} • 💬 Chat Agent
+                                        </span>
+                                      </div>
+                                      {model === m.id && (
+                                        <CheckIcon className="ml-2 size-4 text-green-500" />
+                                      )}
+                                    </ModelSelectorItem>
+                                  ))}
+                                </ModelSelectorGroup>
+                              );
+                            })}
+                          </>
+                        )}
+                        
+                        {/* Autres modèles */}
+                        {Object.keys(groupedModels).some(vendor => 
+                          groupedModels[vendor].some(m => !m.isAgent)
+                        ) && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-zinc-400 mt-2">
+                              📦 OTHER MODELS
+                            </div>
+                            {Object.keys(groupedModels).sort().map((vendor) => {
+                              const nonAgentModels = groupedModels[vendor].filter(m => !m.isAgent);
+                              if (nonAgentModels.length === 0) return null;
+                              
+                              return (
+                                <ModelSelectorGroup heading={vendor} key={`other-${vendor}`}>
+                                  {nonAgentModels.map((m) => (
+                                    <ModelSelectorItem
+                                      key={m.id}
+                                      onSelect={() => handleModelChange(m.id)}
+                                      value={m.id}
+                                    >
+                                      <ModelSelectorLogo
+                                        provider={m.vendor.toLowerCase()}
+                                      />
+                                      <div className="flex flex-1 flex-col items-start">
+                                        <ModelSelectorName>{m.name}</ModelSelectorName>
+                                        <span className="text-muted-foreground text-xs">
+                                          {m.family} • {m.version}
+                                        </span>
+                                      </div>
+                                      {model === m.id && (
+                                        <CheckIcon className="ml-2 size-4 text-green-500" />
+                                      )}
+                                    </ModelSelectorItem>
+                                  ))}
+                                </ModelSelectorGroup>
+                              );
+                            })}
+                          </>
+                        )}
                       </ModelSelectorList>
                     </ModelSelectorContent>
                   </ModelSelector>
