@@ -17,13 +17,16 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 
 interface ActivityFeedProps {
   activities: Activity[];
   onClear?: () => void;
   className?: string;
 }
+
+// Limiter à 50 activités max pour éviter les problèmes de performance
+const MAX_ACTIVITIES = 50;
 
 const activityIcons: Record<Activity['type'], React.ReactNode> = {
   file_read: <FileIcon className="size-3.5 text-blue-400" />,
@@ -88,13 +91,22 @@ function formatRelativeTime(timestamp: number): string {
 
 export function ActivityFeed({ activities, onClear, className }: ActivityFeedProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastScrollTimeRef = useRef<number>(0);
   
-  // Auto-scroll to bottom when new activities arrive
+  // Limiter les activités affichées pour éviter les problèmes de performance
+  const displayedActivities = useMemo(() => {
+    return activities.slice(-MAX_ACTIVITIES);
+  }, [activities]);
+  
+  // Auto-scroll to bottom when new activities arrive (throttled)
   useEffect(() => {
-    if (scrollRef.current) {
+    const now = Date.now();
+    // Throttle: au maximum 1 scroll toutes les 500ms
+    if (scrollRef.current && now - lastScrollTimeRef.current > 500) {
+      lastScrollTimeRef.current = now;
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [activities]);
+  }, [displayedActivities.length]);
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
@@ -103,9 +115,9 @@ export function ActivityFeed({ activities, onClear, className }: ActivityFeedPro
         <div className="flex items-center gap-2">
           <div className="size-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-medium text-zinc-300">Activity Feed</span>
-          <span className="text-xs text-zinc-500">({activities.length})</span>
+          <span className="text-xs text-zinc-500">({displayedActivities.length}{activities.length > MAX_ACTIVITIES ? `/${activities.length}` : ''})</span>
         </div>
-        {onClear && activities.length > 0 && (
+        {onClear && displayedActivities.length > 0 && (
           <Button 
             variant="ghost" 
             size="sm" 
@@ -121,14 +133,14 @@ export function ActivityFeed({ activities, onClear, className }: ActivityFeedPro
       {/* Activities */}
       <ScrollArea className="flex-1" ref={scrollRef}>
         <div className="p-2 space-y-1">
-          {activities.length === 0 ? (
+          {displayedActivities.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-zinc-500">
               <BrainIcon className="size-8 mb-2 opacity-50" />
               <p className="text-xs">Waiting for activity...</p>
               <p className="text-xs opacity-50">Actions will appear here in real-time</p>
             </div>
           ) : (
-            activities.map((activity) => (
+            displayedActivities.map((activity) => (
               <ActivityItem key={activity.id} activity={activity} />
             ))
           )}

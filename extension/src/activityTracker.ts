@@ -47,6 +47,7 @@ export class ActivityTracker {
   private callbacks: ActivityCallbacks | undefined;
   private activityCounter = 0;
   private recentFiles: Set<string> = new Set();
+  private recentDiagnostics: Set<string> = new Set();
   private isTracking = false;
 
   private constructor() {}
@@ -99,7 +100,7 @@ export class ActivityTracker {
           const path = vscode.workspace.asRelativePath(event.document.uri);
           if (!this.recentFiles.has(path)) {
             this.recentFiles.add(path);
-            setTimeout(() => this.recentFiles.delete(path), 500);
+            setTimeout(() => this.recentFiles.delete(path), 2000);
             
             this.emitActivity({
               type: 'file_modify',
@@ -196,36 +197,45 @@ export class ActivityTracker {
         for (const uri of event.uris) {
           const diagnostics = vscode.languages.getDiagnostics(uri);
           const errors = diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Error);
-          const warnings = diagnostics.filter(d => d.severity === vscode.DiagnosticSeverity.Warning);
           
           if (errors.length > 0) {
-            this.emitActivity({
-              type: 'diagnostic',
-              data: {
-                path: vscode.workspace.asRelativePath(uri),
-                message: `${errors.length} error(s) in ${uri.fsPath.split('/').pop()}`,
-                severity: 'error'
-              }
-            });
+            const path = vscode.workspace.asRelativePath(uri);
+            const key = `${path}-${errors.length}`;
+            
+            // Debounce pour éviter le spam de diagnostics
+            if (!this.recentDiagnostics.has(key)) {
+              this.recentDiagnostics.add(key);
+              setTimeout(() => this.recentDiagnostics.delete(key), 5000);
+              
+              this.emitActivity({
+                type: 'diagnostic',
+                data: {
+                  path,
+                  message: `${errors.length} error(s) in ${uri.fsPath.split('/').pop()}`,
+                  severity: 'error'
+                }
+              });
+            }
           }
         }
       })
     );
 
     // === Active Editor Changes ===
-    this.disposables.push(
-      vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && this.shouldTrackFile(editor.document.uri)) {
-          this.emitActivity({
-            type: 'file_read',
-            data: {
-              path: vscode.workspace.asRelativePath(editor.document.uri),
-              message: `Viewing ${editor.document.uri.fsPath.split('/').pop()}`
-            }
-          });
-        }
-      })
-    );
+    // Désactivé car peut causer trop de spam
+    // this.disposables.push(
+    //   vscode.window.onDidChangeActiveTextEditor((editor) => {
+    //     if (editor && this.shouldTrackFile(editor.document.uri)) {
+    //       this.emitActivity({
+    //         type: 'file_read',
+    //         data: {
+    //           path: vscode.workspace.asRelativePath(editor.document.uri),
+    //           message: `Viewing ${editor.document.uri.fsPath.split('/').pop()}`
+    //         }
+    //       });
+    //     }
+    //   })
+    // );
 
     console.log('[ActivityTracker] Activity tracking started');
   }

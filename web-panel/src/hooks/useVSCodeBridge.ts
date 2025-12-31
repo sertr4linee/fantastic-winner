@@ -72,14 +72,31 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
   const pendingRequestsRef = useRef<Map<string, (success: boolean) => void>>(new Map());
   const currentStreamRef = useRef<string>('');
   const copilotStreamRef = useRef<string>('');
+  const isConnectingRef = useRef(false);
 
   const connect = useCallback(() => {
+    // Prevent multiple simultaneous connection attempts
+    if (isConnectingRef.current || (wsRef.current && wsRef.current.readyState === WebSocket.OPEN)) {
+      console.log('[Bridge] Already connected or connecting, skipping...');
+      return;
+    }
+    
+    // Close any existing connection that's not open
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    
+    isConnectingRef.current = true;
+    
     try {
       // Connexion WebSocket au serveur de l'extension
-      const ws = new WebSocket('ws://127.0.0.1:57129');
+      // Use localhost instead of 127.0.0.1 for better browser compatibility
+      const ws = new WebSocket('ws://localhost:57129');
       
       ws.onopen = () => {
         console.log('[Bridge] Connected to VS Code extension');
+        isConnectingRef.current = false;
         setIsConnected(true);
         setError(null);
         
@@ -293,10 +310,10 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               const activity = message.payload as Activity;
               console.log('[Bridge] Activity:', activity.type, activity.data.message || activity.data.path);
               setActivities(prev => {
-                // Garder uniquement les 100 dernières activités pour éviter les problèmes de mémoire
+                // Garder uniquement les 50 dernières activités pour éviter les problèmes de mémoire
                 const newActivities = [...prev, activity];
-                if (newActivities.length > 100) {
-                  return newActivities.slice(-100);
+                if (newActivities.length > 50) {
+                  return newActivities.slice(-50);
                 }
                 return newActivities;
               });
@@ -318,24 +335,30 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
 
       ws.onclose = () => {
         console.log('[Bridge] Disconnected from VS Code extension');
+        isConnectingRef.current = false;
         setIsConnected(false);
         wsRef.current = null;
         
-        // Tentative de reconnexion après 2 secondes
+        // Tentative de reconnexion après 3 secondes (increased from 2)
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
         reconnectTimeoutRef.current = setTimeout(() => {
           console.log('[Bridge] Attempting to reconnect...');
           connect();
-        }, 2000);
+        }, 3000);
       };
 
       ws.onerror = () => {
         console.error('[Bridge] WebSocket error: Unable to connect to ws://127.0.0.1:57129');
+        isConnectingRef.current = false;
         setError('Connection error - is the VS Code extension running?');
       };
 
       wsRef.current = ws;
     } catch (e) {
       console.error('[Bridge] Failed to connect:', e);
+      isConnectingRef.current = false;
       setError('Failed to connect to VS Code extension');
     }
   }, []);

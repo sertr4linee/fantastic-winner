@@ -5,7 +5,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { ModelBridge } from './modelBridge';
 import { ChatParticipantBridge } from './chatParticipant';
 import { ActivityTracker } from './activityTracker';
@@ -95,54 +94,27 @@ export class AppBuilderServer {
         name: 'AI App Builder',
         version: '0.1.0',
         wsPort: this.port,
+        panelUrl: 'http://localhost:3001',
         capabilities: [
           'listModels',
           'changeModel',
-          'modelSubscription'
+          'modelSubscription',
+          'activityTracking',
+          'nextJsProjects',
+          'mcpServers'
         ]
       });
     });
 
-    // Configuration du proxy vers le serveur Next.js de développement
-    // Try port 3001 first (common when 3000 is busy), then 3000
-    const nextJsDevPort = 3001;
-    
-    // Proxy pour les fichiers statiques et les pages Next.js
-    this.app.use('/_next', createProxyMiddleware({
-      target: `http://127.0.0.1:${nextJsDevPort}`,
-      changeOrigin: true,
-      ws: true
-    }));
-
-    // Proxy pour les fichiers publics
-    this.app.use('/favicon.ico', createProxyMiddleware({
-      target: `http://127.0.0.1:${nextJsDevPort}`,
-      changeOrigin: true
-    }));
-
-    // Page d'accueil et autres routes - proxy vers Next.js si disponible, sinon page de fallback
-    this.app.get('*', async (req, res, next) => {
-      // Vérifier si Next.js est en cours d'exécution
-      try {
-        const checkResponse = await fetch(`http://127.0.0.1:${nextJsDevPort}${req.path}`, {
-          method: 'HEAD',
-          signal: AbortSignal.timeout(500)
-        });
-        
-        // Next.js répond, on proxy la requête
-        createProxyMiddleware({
-          target: `http://127.0.0.1:${nextJsDevPort}`,
-          changeOrigin: true
-        })(req, res, next);
-      } catch {
-        // Next.js n'est pas disponible, afficher la page de fallback
-        res.send(`
+    // Simple status page - le panel Next.js est accessible directement sur localhost:3001
+    this.app.get('/', (req, res) => {
+      res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI App Builder</title>
+  <title>AI App Builder - API Server</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
@@ -164,7 +136,7 @@ export class AppBuilderServer {
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    p { color: #a1a1aa; margin-bottom: 1.5rem; line-height: 1.6; }
+    p { color: #a1a1aa; margin-bottom: 1rem; line-height: 1.6; }
     .status { 
       display: inline-flex;
       align-items: center;
@@ -173,7 +145,7 @@ export class AppBuilderServer {
       background: #18181b;
       border: 1px solid #27272a;
       border-radius: 8px;
-      margin-bottom: 1.5rem;
+      margin: 0.5rem;
     }
     .dot {
       width: 8px; height: 8px;
@@ -181,72 +153,59 @@ export class AppBuilderServer {
       border-radius: 50%;
       animation: pulse 2s infinite;
     }
-    .dot.warning { background: #f59e0b; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .code {
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 8px;
-      padding: 16px;
-      font-family: 'SF Mono', Monaco, monospace;
-      font-size: 14px;
-      text-align: left;
-    }
-    .code div { margin: 8px 0; }
-    .cmd { color: #3b82f6; }
     .btn {
       display: inline-block;
-      margin-top: 1rem;
-      padding: 10px 20px;
+      margin-top: 1.5rem;
+      padding: 12px 24px;
       background: #3b82f6;
       color: white;
       border-radius: 8px;
       text-decoration: none;
       font-weight: 500;
+      font-size: 1rem;
     }
     .btn:hover { background: #2563eb; }
+    .endpoints {
+      margin-top: 2rem;
+      text-align: left;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .endpoints h3 { margin-bottom: 12px; font-size: 0.875rem; color: #71717a; text-transform: uppercase; }
+    .endpoint { font-family: monospace; font-size: 13px; padding: 4px 0; color: #a1a1aa; }
+    .endpoint span { color: #3b82f6; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>🤖 AI App Builder</h1>
+    <p>API & WebSocket Server</p>
     
     <div class="status">
       <span class="dot"></span>
-      <span>WebSocket Server: Running (port ${this.port})</span>
+      <span>WebSocket: ws://localhost:${this.port}</span>
     </div>
-    <br>
     <div class="status">
-      <span class="dot warning"></span>
-      <span>Next.js Panel: Not Running (port ${nextJsDevPort})</span>
+      <span class="dot"></span>
+      <span>API: http://localhost:${this.port}/api</span>
     </div>
 
-    <p style="margin-top: 1.5rem;">
-      L'interface web Next.js n'est pas démarrée.<br>
-      Lancez-la pour accéder au panneau de contrôle :
-    </p>
+    <a href="http://localhost:3001" class="btn" target="_blank">Open Control Panel →</a>
 
-    <div class="code">
-      <div><span class="cmd">$</span> cd ai-app-builder/web-panel</div>
-      <div><span class="cmd">$</span> bun dev</div>
+    <div class="endpoints">
+      <h3>API Endpoints</h3>
+      <div class="endpoint"><span>GET</span> /api/health</div>
+      <div class="endpoint"><span>GET</span> /api/info</div>
+      <div class="endpoint"><span>GET</span> /api/models</div>
+      <div class="endpoint"><span>POST</span> /api/models/change</div>
     </div>
-
-    <a href="javascript:location.reload()" class="btn">↻ Rafraîchir</a>
   </div>
-
-  <script>
-    // Check every 3 seconds if Next.js is available
-    setInterval(async () => {
-      try {
-        await fetch('http://127.0.0.1:${nextJsDevPort}', { mode: 'no-cors', signal: AbortSignal.timeout(1000) });
-        location.reload();
-      } catch {}
-    }, 3000);
-  </script>
 </body>
 </html>
-        `);
-      }
+      `);
     });
   }
 
@@ -773,11 +732,27 @@ export class AppBuilderServer {
         args = ['run', 'dev', '--', '--port', String(port)];
       }
 
+      // Ensure PATH includes common package manager locations on macOS/Linux
+      const additionalPaths = [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        `${process.env.HOME}/.bun/bin`,
+        `${process.env.HOME}/.nvm/versions/node/current/bin`,
+        `${process.env.HOME}/.local/bin`,
+      ].join(':');
+      
+      const enhancedPath = `${additionalPaths}:${process.env.PATH || ''}`;
+
       const child = spawn(command, args, {
         cwd: projectPath,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PORT: String(port) }
+        env: { 
+          ...process.env, 
+          PORT: String(port),
+          PATH: enhancedPath
+        }
       });
 
       this.nextJsProcesses.set(projectPath, child);

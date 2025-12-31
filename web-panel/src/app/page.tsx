@@ -110,10 +110,16 @@ const Example = () => {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
 
-  // Detect Next.js projects on initial load
+  // Detect Next.js projects on initial load (only once when connected)
+  const hasDetectedProjects = useRef(false);
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && !hasDetectedProjects.current) {
+      hasDetectedProjects.current = true;
       detectNextJsProjects();
+    }
+    // Reset flag when disconnected
+    if (!isConnected) {
+      hasDetectedProjects.current = false;
     }
   }, [isConnected, detectNextJsProjects]);
 
@@ -288,6 +294,8 @@ const Example = () => {
                   inputTokens: inputTokens,
                   outputTokens: outputTokens,
                   totalTokens: totalTokens,
+                  inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
+                  outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
                 }}
               >
                 <ContextTrigger className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-800" />
