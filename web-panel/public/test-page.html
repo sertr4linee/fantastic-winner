@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOM Selector Test Page</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    h1 {
+      font-size: 48px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 20px;
+    }
+
+    .subtitle {
+      font-size: 18px;
+      color: #666;
+      margin-bottom: 40px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .card {
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      border-radius: 12px;
+      padding: 30px;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .card h3 {
+      font-size: 24px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    .card p {
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #f5f7fa;
+      color: #333;
+      border: 2px solid #667eea;
+    }
+
+    .btn-secondary:hover {
+      background: #667eea;
+      color: white;
+    }
+
+    .nested-container {
+      background: #f9f9f9;
+      border: 2px dashed #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 40px;
+    }
+
+    .nested-item {
+      background: white;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .complex-layout {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .sidebar {
+      flex: 0 0 200px;
+      background: #2d3748;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .sidebar ul {
+      list-style: none;
+    }
+
+    .sidebar li {
+      padding: 10px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .sidebar li:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .main-content {
+      flex: 1;
+      background: #edf2f7;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .transformed-box {
+      width: 200px;
+      height: 150px;
+      background: linear-gradient(45deg, #ff6b6b, #feca57);
+      border-radius: 12px;
+      transform: rotate(-3deg) scale(1.05);
+      transition: transform 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: bold;
+      margin: 40px;
+    }
+
+    .transformed-box:hover {
+      transform: rotate(0deg) scale(1.1);
+    }
+
+    .absolute-positioned {
+      position: relative;
+      height: 200px;
+      background: #e3f2fd;
+      border-radius: 8px;
+      margin-bottom: 40px;
+    }
+
+    .absolute-item {
+      position: absolute;
+      padding: 10px 20px;
+      background: #2196f3;
+      color: white;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .absolute-item:nth-child(1) {
+      top: 20px;
+      left: 20px;
+    }
+
+    .absolute-item:nth-child(2) {
+      top: 20px;
+      right: 20px;
+    }
+
+    .absolute-item:nth-child(3) {
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .overflow-container {
+      height: 200px;
+      overflow-y: scroll;
+      background: #fff3cd;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 40px;
+    }
+
+    .overflow-item {
+      padding: 15px;
+      margin-bottom: 10px;
+      background: white;
+      border-radius: 6px;
+      border-left: 4px solid #ffc107;
+    }
+
+    .inline-elements {
+      margin-bottom: 40px;
+    }
+
+    .inline-elements span {
+      display: inline-block;
+      padding: 5px 10px;
+      margin: 5px;
+      background: #e1bee7;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .inline-elements span:hover {
+      background: #ba68c8;
+      color: white;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .complex-layout {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        flex: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 id="main-title">DOM Selector Test Page</h1>
+    <p class="subtitle">Hover and click elements to test the DOM selector</p>
+
+    <div class="button-group">
+      <button class="btn-primary" data-action="primary">Primary Button</button>
+      <button class="btn-secondary" data-action="secondary">Secondary Button</button>
+      <button class="btn-primary" data-action="submit">Submit</button>
+      <button class="btn-secondary" data-action="cancel">Cancel</button>
+    </div>
+
+    <div class="grid">
+      <div class="card" data-card-id="card-1">
+        <h3>Card One</h3>
+        <p>This is a test card with some content. Try selecting different elements!</p>
+      </div>
+      <div class="card" data-card-id="card-2">
+        <h3>Card Two</h3>
+        <p>Another card with nested elements to test the selector precision.</p>
+      </div>
+      <div class="card" data-card-id="card-3">
+        <h3>Card Three</h3>
+        <p>The third card demonstrates grid layouts and hover effects.</p>
+      </div>
+    </div>
+
+    <div class="nested-container">
+      <h2>Nested Elements</h2>
+      <div class="nested-item">
+        <strong>Item 1:</strong> This is a nested item
+      </div>
+      <div class="nested-item">
+        <strong>Item 2:</strong> Another nested element
+        <div style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 4px;">
+          <em>Even deeper nesting!</em>
+        </div>
+      </div>
+    </div>
+
+    <div class="complex-layout">
+      <aside class="sidebar">
+        <h3>Navigation</h3>
+        <ul>
+          <li data-nav="home">Home</li>
+          <li data-nav="about">About</li>
+          <li data-nav="services">Services</li>
+          <li data-nav="contact">Contact</li>
+        </ul>
+      </aside>
+      <main class="main-content">
+        <h2>Main Content Area</h2>
+        <p>This section demonstrates a more complex layout with sidebar navigation.</p>
+        <p>Try selecting elements at different nesting levels.</p>
+      </main>
+    </div>
+
+    <div class="transformed-box">
+      Transformed Element
+    </div>
+
+    <div class="absolute-positioned">
+      <div class="absolute-item">Top Left</div>
+      <div class="absolute-item">Top Right</div>
+      <div class="absolute-item">Bottom Center</div>
+    </div>
+
+    <div class="overflow-container">
+      <h3>Scrollable Container</h3>
+      <div class="overflow-item">Scroll Item 1</div>
+      <div class="overflow-item">Scroll Item 2</div>
+      <div class="overflow-item">Scroll Item 3</div>
+      <div class="overflow-item">Scroll Item 4</div>
+      <div class="overflow-item">Scroll Item 5</div>
+      <div class="overflow-item">Scroll Item 6</div>
+    </div>
+
+    <div class="inline-elements">
+      <h3>Inline Elements</h3>
+      <span>Tag 1</span>
+      <span>Tag 2</span>
+      <span>Tag 3</span>
+      <span>Tag 4</span>
+      <span>Tag 5</span>
+      <span>Tag 6</span>
+      <span>Tag 7</span>
+      <span>Tag 8</span>
+    </div>
+
+    <footer style="text-align: center; padding: 40px 0; color: #999; border-top: 2px solid #eee;">
+      <p>&copy; 2025 DOM Selector Test Page</p>
+      <p style="margin-top: 10px; font-size: 14px;">
+        Try selecting various elements to test precision, performance, and smooth animations
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    // Quelques interactions basiques pour tester
+    document.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('click', () => {
+        console.log('Card clicked:', card.dataset.cardId);
+      });
+    });
+
+    document.querySelectorAll('button').forEach(button => {
+      button.addEventListener('click', () => {
+        console.log('Button clicked:', button.dataset.action);
+      });
+    });
+
+    document.querySelectorAll('.sidebar li').forEach(item => {
+      item.addEventListener('click', () => {
+        console.log('Nav clicked:', item.dataset.nav);
+      });
+    });
+
+    console.log('Test page loaded. Ready for DOM selection!');
+  </script>
+</body>
+</html>
