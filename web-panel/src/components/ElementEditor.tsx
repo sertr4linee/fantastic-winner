@@ -11,17 +11,14 @@ import {
   PaintbrushIcon, 
   TypeIcon, 
   BoxIcon, 
-  LayersIcon,
   CodeIcon,
   CopyIcon,
   CheckIcon,
   RotateCcwIcon,
-  SendIcon,
   SparklesIcon,
   CheckCircleIcon,
   AlertCircleIcon,
-  SaveIcon,
-  FileCodeIcon
+  SaveIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { cssToTailwind, mergeClasses, type FullConversionResult } from '@/lib/css-to-tailwind';
@@ -88,6 +85,7 @@ interface ElementEditorProps {
   onStyleChange: (selector: string, styles: Partial<ElementStyles>) => void;
   onTextChange: (selector: string, text: string) => void;
   onApplyToCode: (selector: string, changes: ElementChanges) => void;
+  onSaveComplete?: () => void;
   className?: string;
 }
 
@@ -117,6 +115,7 @@ export function ElementEditor({
   onStyleChange, 
   onTextChange,
   onApplyToCode,
+  onSaveComplete,
   className 
 }: ElementEditorProps) {
   const [localStyles, setLocalStyles] = useState<ElementStyles>({});
@@ -125,6 +124,7 @@ export function ElementEditor({
   const [copiedTailwind, setCopiedTailwind] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveAsTailwind, setSaveAsTailwind] = useState(true); // Default to Tailwind
   const textDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const lastSelectorRef = useRef<string>('');
   
@@ -215,7 +215,35 @@ export function ElementEditor({
         styleChanges[key as keyof ElementStyles] = value;
       }
     }
-    if (Object.keys(styleChanges).length > 0) {
+    
+    // If saving as Tailwind, convert styles to classes
+    if (saveAsTailwind && Object.keys(styleChanges).length > 0) {
+      // Convert changed styles to Tailwind classes
+      const conversionResult = cssToTailwind(styleChanges as Record<string, string>);
+      if (conversionResult.classes.length > 0) {
+        // Merge with existing classes
+        const newClasses = element.className 
+          ? mergeClasses(element.className, conversionResult.classes.join(' '))
+          : conversionResult.classes.join(' ');
+        changes.className = newClasses;
+        
+        // Only keep unconverted styles as inline
+        if (conversionResult.unconverted.length > 0) {
+          const unconvertedStyles: Partial<ElementStyles> = {};
+          for (const item of conversionResult.unconverted) {
+            unconvertedStyles[item.property as keyof ElementStyles] = item.value;
+          }
+          changes.styles = unconvertedStyles;
+        }
+        
+        console.log('[ElementEditor] Tailwind conversion:', {
+          classes: conversionResult.classes,
+          mergedClassName: changes.className,
+          unconvertedStyles: changes.styles
+        });
+      }
+    } else if (Object.keys(styleChanges).length > 0) {
+      // Save as inline styles
       changes.styles = styleChanges;
     }
     
@@ -227,6 +255,7 @@ export function ElementEditor({
     console.log('[ElementEditor] Applying to code:', { 
       selector: element.selector, 
       changes,
+      saveAsTailwind,
       localText,
       originalText: originalTextRef.current,
       hasTextChange: localText !== originalTextRef.current
@@ -241,11 +270,13 @@ export function ElementEditor({
       setTimeout(() => {
         setIsSaving(false);
         setHasChanges(false);
-      }, 1000);
+        // Deselect element after save
+        onSaveComplete?.();
+      }, 800);
     } else {
       console.log('[ElementEditor] No changes to apply');
     }
-  }, [element, localStyles, localText, onApplyToCode]);
+  }, [element, localStyles, localText, saveAsTailwind, onApplyToCode]);
 
   const handleReset = useCallback(() => {
     if (element) {
@@ -300,30 +331,20 @@ export function ElementEditor({
             <span className="text-xs text-zinc-500">#{element.id}</span>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          {hasChanges && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleReset}
-                className="h-6 px-2 text-xs"
-              >
-                <RotateCcwIcon className="size-3 mr-1" />
-                Reset
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleApplyToCode}
-                className="h-6 px-2 text-xs bg-blue-600 hover:bg-blue-700"
-              >
-                <SendIcon className="size-3 mr-1" />
-                Apply to Code
-              </Button>
-            </>
+        {/* Tailwind mode toggle - always visible */}
+        <button
+          onClick={() => setSaveAsTailwind(!saveAsTailwind)}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] transition-colors",
+            saveAsTailwind 
+              ? "bg-emerald-500/20 text-emerald-400" 
+              : "bg-zinc-800 text-zinc-500"
           )}
-        </div>
+          title={saveAsTailwind ? "Saving as Tailwind classes" : "Saving as inline styles"}
+        >
+          <SparklesIcon className="size-3" />
+          <span>TW</span>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -699,22 +720,19 @@ export function ElementEditor({
                     onTextChange(element.selector, localText);
                   }
                 }}
+                onKeyDown={(e) => {
+                  // Apply on Ctrl/Cmd + Enter
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    if (element) {
+                      onTextChange(element.selector, localText);
+                    }
+                  }
+                }}
                 placeholder="Enter text..."
                 className="w-full h-20 p-2 text-xs font-mono bg-zinc-800 border border-zinc-700 rounded-md resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (element) {
-                    console.log('[ElementEditor] Manual apply text:', element.selector, localText);
-                    onTextChange(element.selector, localText);
-                  }
-                }}
-                className="w-full h-7 text-xs"
-              >
-                Apply Text Change
-              </Button>
+              <p className="text-[10px] text-zinc-600">Press ⌘+Enter to preview • Changes auto-apply</p>
             </div>
 
             <Separator className="bg-zinc-800" />
@@ -991,40 +1009,41 @@ export function ElementEditor({
         </div>
       </Tabs>
 
-      {/* Fixed bottom action bar - Save to File */}
+      {/* Fixed bottom action bar */}
       {hasChanges && (
-        <div className="shrink-0 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <FileCodeIcon className="size-4 text-blue-400" />
-              <span>Unsaved changes</span>
+        <div className="shrink-0 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <div className="size-2 rounded-full bg-amber-500 animate-pulse" />
+              <span>Unsaved</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleReset}
-                className="h-8 px-3 text-xs"
+                className="h-7 px-2 text-xs text-zinc-400"
               >
-                <RotateCcwIcon className="size-3 mr-1" />
-                Reset
+                <RotateCcwIcon className="size-3" />
               </Button>
               <Button
                 variant="default"
                 size="sm"
                 onClick={handleApplyToCode}
                 disabled={isSaving}
-                className="h-8 px-4 text-xs bg-green-600 hover:bg-green-700 text-white font-medium"
+                className={cn(
+                  "h-7 px-3 text-xs text-white font-medium",
+                  saveAsTailwind 
+                    ? "bg-emerald-600 hover:bg-emerald-700" 
+                    : "bg-blue-600 hover:bg-blue-700"
+                )}
               >
                 {isSaving ? (
-                  <>
-                    <CheckIcon className="size-3 mr-1 animate-pulse" />
-                    Saving...
-                  </>
+                  <CheckIcon className="size-3 animate-pulse" />
                 ) : (
                   <>
                     <SaveIcon className="size-3 mr-1" />
-                    Save to File
+                    Save
                   </>
                 )}
               </Button>

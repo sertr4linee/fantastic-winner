@@ -306,6 +306,9 @@ class AppBuilderServer {
             case 'detectMCPServers':
                 await this.detectAndSendMCPServers(ws);
                 break;
+            case 'setupDOMBridge':
+                await this.handleSetupDOMBridge(ws, message.payload.projectPath);
+                break;
             case 'applyElementChanges':
                 await this.handleApplyElementChanges(ws, message);
                 break;
@@ -1036,6 +1039,392 @@ class AppBuilderServer {
         });
     }
     // ============== End MCP Server Detection ==============
+    // ============== DOM Bridge Setup ==============
+    /**
+     * Setup DOM Bridge for a Next.js project
+     * Creates DOMSelectorBridge.tsx and modifies layout.tsx to import it
+     */
+    async handleSetupDOMBridge(ws, projectPath) {
+        console.log(`[Server] Setting up DOM Bridge for project: ${projectPath}`);
+        try {
+            const appDir = path.join(projectPath, 'app');
+            const srcAppDir = path.join(projectPath, 'src', 'app');
+            // Determine the app directory (could be /app or /src/app)
+            let targetAppDir = appDir;
+            if (!fs.existsSync(appDir) && fs.existsSync(srcAppDir)) {
+                targetAppDir = srcAppDir;
+            }
+            if (!fs.existsSync(targetAppDir)) {
+                throw new Error(`App directory not found: ${targetAppDir}`);
+            }
+            const bridgeFilePath = path.join(targetAppDir, 'DOMSelectorBridge.tsx');
+            const layoutFilePath = path.join(targetAppDir, 'layout.tsx');
+            // 1. Create DOMSelectorBridge.tsx
+            const bridgeCode = this.getDOMSelectorBridgeCode();
+            fs.writeFileSync(bridgeFilePath, bridgeCode, 'utf-8');
+            console.log(`[Server] Created DOMSelectorBridge.tsx at ${bridgeFilePath}`);
+            // 2. Modify layout.tsx to import and use DOMSelectorBridge
+            if (!fs.existsSync(layoutFilePath)) {
+                throw new Error(`Layout file not found: ${layoutFilePath}`);
+            }
+            let layoutContent = fs.readFileSync(layoutFilePath, 'utf-8');
+            // Check if already imported
+            if (layoutContent.includes('DOMSelectorBridge')) {
+                console.log('[Server] DOMSelectorBridge already imported in layout.tsx');
+                this.sendToClient(ws, {
+                    type: 'domBridgeSetupComplete',
+                    payload: {
+                        success: true,
+                        message: 'DOM Bridge already setup',
+                        projectPath
+                    }
+                });
+                return;
+            }
+            // Add import at the top (after 'use client' if present, or after other imports)
+            const importStatement = "import { DOMSelectorBridge } from './DOMSelectorBridge';\n";
+            // Find the best place to add the import
+            if (layoutContent.includes("'use client'") || layoutContent.includes('"use client"')) {
+                // Add after 'use client' directive
+                layoutContent = layoutContent.replace(/(['"]use client['"];?\n)/, `$1\n${importStatement}`);
+            }
+            else {
+                // Find the last import statement and add after it
+                const importRegex = /^import .+;?\n/gm;
+                let lastImportMatch;
+                let match;
+                while ((match = importRegex.exec(layoutContent)) !== null) {
+                    lastImportMatch = match;
+                }
+                if (lastImportMatch) {
+                    const insertPosition = lastImportMatch.index + lastImportMatch[0].length;
+                    layoutContent = layoutContent.slice(0, insertPosition) + importStatement + layoutContent.slice(insertPosition);
+                }
+                else {
+                    // No imports found, add at the beginning
+                    layoutContent = importStatement + layoutContent;
+                }
+            }
+            // Add <DOMSelectorBridge /> inside the body tag
+            // Look for {children} and add before it
+            if (layoutContent.includes('{children}')) {
+                layoutContent = layoutContent.replace(/(\{children\})/, '<DOMSelectorBridge />\n        $1');
+            }
+            else {
+                // Alternative: look for </body> and add before it
+                layoutContent = layoutContent.replace(/(<\/body>)/, '        <DOMSelectorBridge />\n      $1');
+            }
+            // Write the modified layout
+            fs.writeFileSync(layoutFilePath, layoutContent, 'utf-8');
+            console.log(`[Server] Modified layout.tsx to include DOMSelectorBridge`);
+            // Send success response
+            this.sendToClient(ws, {
+                type: 'domBridgeSetupComplete',
+                payload: {
+                    success: true,
+                    message: 'DOM Bridge setup complete! Please restart your dev server.',
+                    projectPath,
+                    filesModified: [bridgeFilePath, layoutFilePath]
+                }
+            });
+            // Show notification in VS Code
+            vscode.window.showInformationMessage(`DOM Bridge setup complete for ${path.basename(projectPath)}. Please restart the dev server.`);
+        }
+        catch (error) {
+            console.error('[Server] Error setting up DOM Bridge:', error);
+            this.sendToClient(ws, {
+                type: 'domBridgeSetupError',
+                payload: {
+                    error: error instanceof Error ? error.message : String(error),
+                    projectPath
+                }
+            });
+        }
+    }
+    getDOMSelectorBridgeCode() {
+        return `'use client';
+
+import { useEffect } from 'react';
+
+export function DOMSelectorBridge() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if ((window as any).__DOM_SELECTOR_INJECTED__) return;
+    (window as any).__DOM_SELECTOR_INJECTED__ = true;
+
+    console.log('[DOMSelectorBridge] Initializing...');
+
+    let isInspecting = false;
+    let hoverOverlay: HTMLDivElement | null = null;
+    let currentElement: Element | null = null;
+
+    function createOverlay() {
+      if (hoverOverlay) return;
+      hoverOverlay = document.createElement('div');
+      hoverOverlay.id = '__dom-selector-overlay__';
+      hoverOverlay.style.cssText = 'position: fixed; pointer-events: none; z-index: 999999; background: rgba(59, 130, 246, 0.15); border: 2px solid rgba(59, 130, 246, 0.8); transition: all 0.05s ease-out; display: none;';
+      document.body.appendChild(hoverOverlay);
+    }
+
+    function removeOverlay() {
+      if (hoverOverlay) {
+        hoverOverlay.remove();
+        hoverOverlay = null;
+      }
+    }
+
+    function getUniqueSelector(element: Element): string {
+      if (element.id) return '#' + element.id;
+      const path: string[] = [];
+      let current: Element | null = element;
+      while (current && current !== document.body && current !== document.documentElement) {
+        let selector = current.tagName.toLowerCase();
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.trim().split(/\\s+/).filter((c: string) => c && !c.startsWith('hover')).slice(0, 2);
+          if (classes.length) selector += '.' + classes.join('.');
+        }
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children);
+          const sameTag = siblings.filter(s => s.tagName === current!.tagName);
+          if (sameTag.length > 1) {
+            const index = sameTag.indexOf(current) + 1;
+            selector += ':nth-of-type(' + index + ')';
+          }
+        }
+        path.unshift(selector);
+        current = current.parentElement;
+      }
+      return path.join(' > ');
+    }
+
+    function getDirectTextContent(element: Element): string {
+      let text = '';
+      for (let i = 0; i < element.childNodes.length; i++) {
+        const node = element.childNodes[i];
+        if (node.nodeType === Node.TEXT_NODE) {
+          text += node.textContent || '';
+        }
+      }
+      return text.trim();
+    }
+
+    function sendBounds(element: Element | null, type: string) {
+      if (!element) {
+        window.parent.postMessage({ type: 'dom-selector-' + type, bounds: null }, '*');
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const computedStyle = window.getComputedStyle(element);
+      const directText = getDirectTextContent(element);
+      const fullText = element.textContent?.trim() || '';
+      const hasChildren = element.children.length > 0;
+      const isComplexText = hasChildren && directText !== fullText;
+      
+      const styles = {
+        display: computedStyle.display, position: computedStyle.position, backgroundColor: computedStyle.backgroundColor,
+        color: computedStyle.color, fontSize: computedStyle.fontSize, fontFamily: computedStyle.fontFamily,
+        fontWeight: computedStyle.fontWeight, lineHeight: computedStyle.lineHeight,
+        padding: computedStyle.padding, paddingTop: computedStyle.paddingTop, paddingRight: computedStyle.paddingRight,
+        paddingBottom: computedStyle.paddingBottom, paddingLeft: computedStyle.paddingLeft,
+        margin: computedStyle.margin, marginTop: computedStyle.marginTop, marginRight: computedStyle.marginRight,
+        marginBottom: computedStyle.marginBottom, marginLeft: computedStyle.marginLeft,
+        border: computedStyle.border, borderRadius: computedStyle.borderRadius,
+        width: computedStyle.width, height: computedStyle.height, maxWidth: computedStyle.maxWidth, maxHeight: computedStyle.maxHeight,
+        minWidth: computedStyle.minWidth, minHeight: computedStyle.minHeight, boxSizing: computedStyle.boxSizing,
+        flexDirection: computedStyle.flexDirection, flexWrap: computedStyle.flexWrap, justifyContent: computedStyle.justifyContent,
+        alignItems: computedStyle.alignItems, gap: computedStyle.gap, gridTemplateColumns: computedStyle.gridTemplateColumns,
+        gridTemplateRows: computedStyle.gridTemplateRows, textAlign: computedStyle.textAlign, textDecoration: computedStyle.textDecoration,
+        textTransform: computedStyle.textTransform, letterSpacing: computedStyle.letterSpacing,
+        opacity: computedStyle.opacity, transform: computedStyle.transform, transition: computedStyle.transition,
+        cursor: computedStyle.cursor, overflow: computedStyle.overflow, zIndex: computedStyle.zIndex,
+      };
+      const attributes: Record<string, string> = {};
+      if (element instanceof HTMLElement) {
+        Array.from(element.attributes).forEach(attr => { attributes[attr.name] = attr.value; });
+      }
+      
+      window.parent.postMessage({
+        type: 'dom-selector-' + type,
+        bounds: {
+          x: rect.left, y: rect.top, width: rect.width, height: rect.height,
+          selector: getUniqueSelector(element), tagName: element.tagName.toLowerCase(),
+          id: element.id || undefined, className: element.className || undefined,
+          computedStyles: styles, attributes: attributes,
+          textContent: isComplexText ? directText : fullText.substring(0, 200),
+          fullTextContent: fullText.substring(0, 500),
+          directTextContent: directText,
+          hasChildren: hasChildren,
+          childCount: element.children.length,
+          isComplexText: isComplexText,
+        }
+      }, '*');
+    }
+
+    function updateOverlay(element: Element | null) {
+      if (!hoverOverlay || !element) {
+        if (hoverOverlay) hoverOverlay.style.display = 'none';
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      hoverOverlay.style.display = 'block';
+      hoverOverlay.style.left = rect.left + 'px';
+      hoverOverlay.style.top = rect.top + 'px';
+      hoverOverlay.style.width = rect.width + 'px';
+      hoverOverlay.style.height = rect.height + 'px';
+    }
+
+    function handleMouseMove(e: MouseEvent) {
+      if (!isInspecting) return;
+      const element = document.elementFromPoint(e.clientX, e.clientY);
+      if (!element || element === hoverOverlay || element === document.body || element === document.documentElement) return;
+      if (element !== currentElement) {
+        currentElement = element;
+        updateOverlay(element);
+        sendBounds(element, 'hover');
+      }
+    }
+
+    function handleClick(e: MouseEvent) {
+      if (!isInspecting) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      const element = document.elementFromPoint(e.clientX, e.clientY);
+      if (element && element !== hoverOverlay) {
+        sendBounds(element, 'select');
+      }
+      return false;
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isInspecting) {
+        window.parent.postMessage({ type: 'dom-selector-cancel' }, '*');
+      }
+    }
+
+    // Helper function to find element by complex selector path
+    function findElementByPath(selectorPath: string): Element | null {
+      try {
+        const direct = document.querySelector(selectorPath);
+        if (direct) return direct;
+      } catch (e) {}
+
+      const parts = selectorPath.split(' > ').map(s => s.trim()).filter(s => s);
+      if (parts.length === 0) return null;
+
+      let current: Element | null = document.body;
+      
+      for (const part of parts) {
+        if (!current) return null;
+        
+        const nthMatch = part.match(/:nth-of-type\\((\\d+)\\)$/);
+        const nthIndex = nthMatch ? parseInt(nthMatch[1]) : null;
+        const cleanPart = part.replace(/:nth-of-type\\(\\d+\\)$/, '');
+        
+        const tagMatch = cleanPart.match(/^([a-z0-9]+)/i);
+        const tag = tagMatch ? tagMatch[1].toUpperCase() : null;
+        const classMatch = cleanPart.match(/\\.([^.]+)/g);
+        const classes = classMatch ? classMatch.map(c => c.slice(1)) : [];
+        
+        const childElements: Element[] = Array.from(current.children);
+        const matching: Element[] = childElements.filter((child: Element) => {
+          if (tag && child.tagName !== tag) return false;
+          if (classes.length > 0) {
+            const childClasses = (child.className as string)?.split?.(/\\s+/) || [];
+            if (!classes.some(c => childClasses.includes(c))) return false;
+          }
+          return true;
+        });
+        
+        if (nthIndex !== null && nthIndex >= 1 && nthIndex <= matching.length) {
+          current = matching[nthIndex - 1];
+        } else if (matching.length > 0) {
+          current = matching[0];
+        } else {
+          try {
+            current = current.querySelector(cleanPart);
+          } catch {
+            return null;
+          }
+        }
+      }
+      
+      return current;
+    }
+
+    function handleMessage(e: MessageEvent) {
+      const { type, selector, styles, text } = e.data || {};
+      
+      if (type === 'dom-selector-enable') {
+        isInspecting = true;
+        createOverlay();
+        document.body.style.cursor = 'crosshair';
+      } else if (type === 'dom-selector-disable') {
+        isInspecting = false;
+        removeOverlay();
+        currentElement = null;
+        document.body.style.cursor = '';
+      } else if (type === 'dom-selector-modify-style') {
+        const element = findElementByPath(selector);
+        if (element && element instanceof HTMLElement) {
+          Object.entries(styles || {}).forEach(([key, value]) => {
+            (element as HTMLElement).style[key as any] = value as string;
+          });
+          window.parent.postMessage({ type: 'dom-selector-style-applied', selector, styles }, '*');
+        }
+      } else if (type === 'dom-selector-modify-text') {
+        const element = findElementByPath(selector);
+        if (element) {
+          const hasChildElements = element.children.length > 0;
+          if (!hasChildElements) {
+            element.textContent = text;
+          } else {
+            const textNodes: ChildNode[] = [];
+            for (let i = 0; i < element.childNodes.length; i++) {
+              const node = element.childNodes[i];
+              if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
+                textNodes.push(node);
+              }
+            }
+            if (textNodes.length === 0) {
+              const firstChild = element.children[0];
+              if (firstChild && firstChild.children.length === 0) {
+                firstChild.textContent = text;
+              } else {
+                element.textContent = text;
+              }
+            } else {
+              textNodes[0].textContent = text;
+            }
+          }
+          window.parent.postMessage({ type: 'dom-selector-text-applied', selector, text }, '*');
+          sendBounds(element, 'select');
+        }
+      }
+    }
+
+    window.addEventListener('message', handleMessage);
+    document.addEventListener('mousemove', handleMouseMove, { capture: true, passive: true });
+    document.addEventListener('click', handleClick, { capture: true });
+    document.addEventListener('keydown', handleKeyDown, { capture: true });
+
+    window.parent.postMessage({ type: 'dom-selector-ready' }, '*');
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      document.removeEventListener('mousemove', handleMouseMove, { capture: true } as any);
+      document.removeEventListener('click', handleClick, { capture: true } as any);
+      document.removeEventListener('keydown', handleKeyDown, { capture: true } as any);
+      removeOverlay();
+      (window as any).__DOM_SELECTOR_INJECTED__ = false;
+    };
+  }, []);
+
+  return null;
+}
+`;
+    }
+    // ============== End DOM Bridge Setup ==============
     // ============== Element Change Application ==============
     /**
      * Handle applying element changes to source code files
@@ -1337,7 +1726,10 @@ class AppBuilderServer {
         // We only care about the LAST part (the actual target element)
         const selectorParts = selector.split(/\s*>\s*/);
         const lastPart = selectorParts[selectorParts.length - 1].trim();
-        // Remove :nth-of-type() for matching
+        // Extract :nth-of-type() index BEFORE removing it
+        const nthMatch = lastPart.match(/:nth-of-type\((\d+)\)/);
+        const nthIndex = nthMatch ? parseInt(nthMatch[1], 10) : 1; // Default to 1 (first element)
+        // Remove :nth-of-type() for class matching
         const cleanSelector = lastPart.replace(/:nth-of-type\(\d+\)/g, '');
         const tagMatch = cleanSelector.match(/^(\w+)/);
         const idMatch = cleanSelector.match(/#([\w-]+)/);
@@ -1351,10 +1743,12 @@ class AppBuilderServer {
             cleanSelector,
             targetTag,
             targetId,
-            targetClasses
+            targetClasses,
+            nthIndex // Log the nth-of-type index
         });
         let hasChanges = false;
         let elementFound = false;
+        let matchCount = 0; // Track how many matches we've found
         try {
             // Parse the JSX content into an AST
             const ast = babelParser.parse(content, {
@@ -1420,9 +1814,17 @@ class AppBuilderServer {
                     }
                     if (!isMatch)
                         return;
-                    // Mark as found to stop after first match
+                    // Increment match count for nth-of-type support
+                    matchCount++;
+                    console.log(`[Server] AST: Found potential match #${matchCount} (need #${nthIndex}): ${elementName}`);
+                    // Only process if this is the nth match we're looking for
+                    if (matchCount !== nthIndex) {
+                        console.log(`[Server] AST: Skipping match #${matchCount}, looking for #${nthIndex}`);
+                        return;
+                    }
+                    // Mark as found to stop after finding the correct nth match
                     elementFound = true;
-                    console.log(`[Server] AST: Found matching element: ${elementName}`);
+                    console.log(`[Server] AST: Found matching element #${nthIndex}: ${elementName}`);
                     // Apply style changes
                     if (changes.styles && Object.keys(changes.styles).length > 0) {
                         // Find existing style attribute
@@ -1457,6 +1859,24 @@ class AppBuilderServer {
                             // Add new style attribute
                             const styleAttr = t.jsxAttribute(t.jsxIdentifier('style'), newStyleExpr);
                             openingElement.attributes.push(styleAttr);
+                        }
+                        hasChanges = true;
+                    }
+                    // Apply className changes (for Tailwind mode)
+                    if (changes.className !== undefined) {
+                        const classAttrIndex = attributes.findIndex((attr) => t.isJSXIdentifier(attr.name) && attr.name.name === 'className');
+                        console.log(`[Server] AST: Applying className: ${changes.className}`);
+                        if (classAttrIndex >= 0) {
+                            // Update existing className attribute
+                            const existingClassAttr = openingElement.attributes[classAttrIndex];
+                            existingClassAttr.value = t.stringLiteral(changes.className);
+                            console.log(`[Server] AST: Updated existing className`);
+                        }
+                        else {
+                            // Add new className attribute
+                            const classAttr = t.jsxAttribute(t.jsxIdentifier('className'), t.stringLiteral(changes.className));
+                            openingElement.attributes.push(classAttr);
+                            console.log(`[Server] AST: Added new className attribute`);
                         }
                         hasChanges = true;
                     }

@@ -498,6 +498,10 @@ export function LivePreviewWithSelector({
               onStyleChange={handleStyleChange}
               onTextChange={handleTextChange}
               onApplyToCode={handleApplyToCode}
+              onSaveComplete={() => {
+                setSelectedElement(null);
+                setIsEditing(false);
+              }}
               className="w-96 border-l border-zinc-800 h-full max-h-screen"
             />
           ) : (

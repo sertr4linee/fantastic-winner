@@ -54,6 +54,8 @@ export interface WebSocketMessage {
     | 'applyElementChanges' | 'elementChangesApplied' | 'elementChangesError'
     // Next.js projects
     | 'detectNextJsProjects' | 'nextJsProjectsDetected' | 'startNextJsProject' | 'stopNextJsProject' | 'nextJsProjectStatus'
+    // DOM Bridge setup
+    | 'setupDOMBridge' | 'domBridgeSetupComplete' | 'domBridgeSetupError'
     // MCP servers
     | 'detectMCPServers' | 'mcpServersDetected';
   payload?: any;

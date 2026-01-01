@@ -52,6 +52,8 @@ export interface WebSocketMessage {
     | 'activity' | 'startTracking' | 'stopTracking'
     // Next.js projects
     | 'detectNextJsProjects' | 'nextJsProjectsDetected' | 'startNextJsProject' | 'stopNextJsProject' | 'nextJsProjectStatus'
+    // DOM Bridge setup
+    | 'setupDOMBridge' | 'domBridgeSetupComplete' | 'domBridgeSetupError'
     // MCP servers
     | 'detectMCPServers' | 'mcpServersDetected'
     // Element editing - apply changes to source code

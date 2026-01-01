@@ -25,6 +25,8 @@ interface UseVSCodeBridgeReturn {
   startNextJsProject: (projectPath: string, port?: number) => void;
   stopNextJsProject: (projectPath: string) => void;
   isDetectingProjects: boolean;
+  // DOM Bridge setup
+  setupDOMBridge: (projectPath: string) => void;
   // MCP server management
   mcpServers: MCPServer[];
   detectMCPServers: () => void;
