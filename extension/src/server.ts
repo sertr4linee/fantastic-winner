@@ -1944,6 +1944,14 @@ export function DOMSelectorBridge() {
         plugins: ['jsx', 'typescript']
       });
 
+      // Mapping of Next.js/React components to their rendered HTML tags
+      const componentToTagMap: Record<string, string[]> = {
+        'image': ['img'],      // Next.js Image -> img
+        'link': ['a'],          // Next.js Link -> a
+        'script': ['script'],   // Next.js Script -> script
+        'head': ['head'],       // Next.js Head -> head
+      };
+
       // Traverse the AST to find and modify the target element
       babelTraverse(ast, {
         JSXElement: (path) => {
@@ -1956,7 +1964,11 @@ export function DOMSelectorBridge() {
           if (!elementName) return;
           
           // Skip if tag doesn't match
-          if (targetTag && elementName.toLowerCase() !== targetTag) return;
+          // Handle Next.js component-to-tag mappings (e.g., Image -> img, Link -> a)
+          const elementNameLower = elementName.toLowerCase();
+          const possibleRenderedTags = componentToTagMap[elementNameLower] || [elementNameLower];
+          
+          if (targetTag && !possibleRenderedTags.includes(targetTag) && elementNameLower !== targetTag) return;
 
           // Get element attributes
           const attributes = openingElement.attributes.filter((attr): attr is t.JSXAttribute => 
@@ -1975,6 +1987,9 @@ export function DOMSelectorBridge() {
 
           // Check for className match
           let classesMatch = false;
+          // Check if this is a Next.js component that injects styles at runtime
+          const isNextJsComponent = ['Image', 'Link', 'Script'].includes(elementName);
+          
           if (targetClasses.length > 0) {
             const classAttr = attributes.find((attr: t.JSXAttribute) => 
               t.isJSXIdentifier(attr.name) && attr.name.name === 'className'
@@ -1990,13 +2005,30 @@ export function DOMSelectorBridge() {
               const reverseMatchingClasses = sourceClasses.filter(sc => targetClasses.includes(sc));
               const reverseMatchRatio = sourceClasses.length > 0 ? reverseMatchingClasses.length / sourceClasses.length : 0;
               
-              // Match if at least 50% of target classes are found in source
-              // OR if at least 3 classes match on both sides
+              // Match criteria:
+              // 1. At least 50% of target classes found in source
+              // 2. At least 3 classes match on both sides
+              // 3. For Next.js components: if most/all source classes are in target (reverse match >= 80%)
+              //    This handles cases where Next.js injects many additional classes at runtime
               if (matchRatio >= 0.5 || 
-                  (matchingClasses.length >= 3 && reverseMatchingClasses.length >= 2)) {
+                  (matchingClasses.length >= 3 && reverseMatchingClasses.length >= 2) ||
+                  (isNextJsComponent && reverseMatchRatio >= 0.8) ||
+                  (sourceClasses.length > 0 && reverseMatchRatio >= 0.8 && matchingClasses.length >= 1)) {
                 classesMatch = true;
-                console.log(`[Server] AST: Class match - ${matchingClasses.length}/${targetClasses.length} (${(matchRatio * 100).toFixed(0)}%) - matching: ${matchingClasses.join(', ')}`);
+                console.log(`[Server] AST: Class match - forward: ${matchingClasses.length}/${targetClasses.length} (${(matchRatio * 100).toFixed(0)}%), reverse: ${reverseMatchingClasses.length}/${sourceClasses.length} (${(reverseMatchRatio * 100).toFixed(0)}%) - matching: ${matchingClasses.join(', ')}`);
               }
+            } else if (!classAttr) {
+              // Element in source has no className - this can happen when:
+              // 1. Next.js Image/Link components inject classes at runtime
+              // 2. CSS modules or styled-components add classes dynamically
+              // In this case, match by tag only since classes are runtime-injected
+              console.log(`[Server] AST: No className in source for ${elementName}, allowing tag-only match (runtime classes)`);
+              classesMatch = true;
+            } else if (classAttr && !t.isStringLiteral(classAttr.value)) {
+              // className exists but is a dynamic expression (template literal, variable, etc.)
+              // Allow match since we can't statically compare
+              console.log(`[Server] AST: Dynamic className for ${elementName}, allowing tag-only match`);
+              classesMatch = true;
             }
           } else if (!targetId) {
             // If no classes and no ID specified, match by tag only

@@ -153,6 +153,15 @@ export function ElementEditor({
   // Store original values when element is selected
   const originalStylesRef = useRef<ElementStyles>({});
   const originalTextRef = useRef<string>('');
+  const originalPositionRef = useRef<PositionValues>({
+    top: 0,
+    right: 'auto',
+    bottom: 'auto',
+    left: 0,
+    translateX: 0,
+    translateY: 0,
+  });
+  const [hasPositionChanges, setHasPositionChanges] = useState(false);
 
   // Tailwind conversion result
   const tailwindResult = useMemo<FullConversionResult>(() => {
@@ -179,7 +188,21 @@ export function ElementEditor({
         setLocalText(textToEdit);
         setHasChanges(false);
         setIsSaving(false);
+        setHasPositionChanges(false);
         lastSelectorRef.current = element.selector;
+        
+        // Reset position values
+        const defaultPosition: PositionValues = {
+          top: 0,
+          right: 'auto',
+          bottom: 'auto',
+          left: 0,
+          translateX: 0,
+          translateY: 0,
+        };
+        setPositionValues(defaultPosition);
+        originalPositionRef.current = { ...defaultPosition };
+        
         // Store original values ONLY for new elements
         originalStylesRef.current = { ...element.styles };
         originalTextRef.current = textToEdit;
@@ -198,6 +221,14 @@ export function ElementEditor({
     
     setPositionValues(newPosition);
     setHasChanges(true);
+    
+    // Check if position actually changed from original
+    const posChanged = 
+      newPosition.top !== originalPositionRef.current.top ||
+      newPosition.left !== originalPositionRef.current.left ||
+      newPosition.translateX !== originalPositionRef.current.translateX ||
+      newPosition.translateY !== originalPositionRef.current.translateY;
+    setHasPositionChanges(posChanged);
     
     // Apply live to preview
     const result = positionToTailwind(positionMode, newPosition);
@@ -250,16 +281,15 @@ export function ElementEditor({
       }
     }
     
+    // Collect all Tailwind classes to add
+    let allTailwindClasses: string[] = [];
+    
     // If saving as Tailwind, convert styles to classes
     if (saveAsTailwind && Object.keys(styleChanges).length > 0) {
       // Convert changed styles to Tailwind classes
       const conversionResult = cssToTailwind(styleChanges as Record<string, string>);
       if (conversionResult.classes.length > 0) {
-        // Merge with existing classes
-        const newClasses = element.className 
-          ? mergeClasses(element.className, conversionResult.classes.join(' '))
-          : conversionResult.classes.join(' ');
-        changes.className = newClasses;
+        allTailwindClasses.push(...conversionResult.classes);
         
         // Only keep unconverted styles as inline
         if (conversionResult.unconverted.length > 0) {
@@ -270,15 +300,34 @@ export function ElementEditor({
           changes.styles = unconvertedStyles;
         }
         
-        console.log('[ElementEditor] Tailwind conversion:', {
+        console.log('[ElementEditor] Style Tailwind conversion:', {
           classes: conversionResult.classes,
-          mergedClassName: changes.className,
           unconvertedStyles: changes.styles
         });
       }
     } else if (Object.keys(styleChanges).length > 0) {
       // Save as inline styles
       changes.styles = styleChanges;
+    }
+    
+    // Handle position changes
+    if (hasPositionChanges) {
+      const positionResult = positionToTailwind(positionMode, positionValues);
+      if (positionResult.classes.length > 0) {
+        allTailwindClasses.push(...positionResult.classes);
+        console.log('[ElementEditor] Position Tailwind conversion:', {
+          classes: positionResult.classes,
+          mode: positionMode
+        });
+      }
+    }
+    
+    // Merge all Tailwind classes with existing
+    if (allTailwindClasses.length > 0) {
+      const newClasses = element.className 
+        ? mergeClasses(element.className, allTailwindClasses.join(' '))
+        : allTailwindClasses.join(' ');
+      changes.className = newClasses;
     }
     
     // Compare text with ORIGINAL value
@@ -290,6 +339,8 @@ export function ElementEditor({
       selector: element.selector, 
       changes,
       saveAsTailwind,
+      hasPositionChanges,
+      positionValues,
       localText,
       originalText: originalTextRef.current,
       hasTextChange: localText !== originalTextRef.current
@@ -301,6 +352,8 @@ export function ElementEditor({
       // Update original refs since we've saved
       originalStylesRef.current = { ...localStyles };
       originalTextRef.current = localText;
+      originalPositionRef.current = { ...positionValues };
+      setHasPositionChanges(false);
       setTimeout(() => {
         setIsSaving(false);
         setHasChanges(false);
@@ -310,7 +363,7 @@ export function ElementEditor({
     } else {
       console.log('[ElementEditor] No changes to apply');
     }
-  }, [element, localStyles, localText, saveAsTailwind, onApplyToCode]);
+  }, [element, localStyles, localText, saveAsTailwind, hasPositionChanges, positionMode, positionValues, onApplyToCode]);
 
   const handleReset = useCallback(() => {
     if (element) {
@@ -399,10 +452,6 @@ export function ElementEditor({
           <TabsTrigger value="text" className="text-xs data-[state=active]:bg-zinc-800">
             <TypeIcon className="size-3 mr-1" />
             Text
-          </TabsTrigger>
-          <TabsTrigger value="code" className="text-xs data-[state=active]:bg-zinc-800">
-            <CodeIcon className="size-3 mr-1" />
-            Code
           </TabsTrigger>
           <TabsTrigger value="export" className="text-xs data-[state=active]:bg-zinc-800">
             <SparklesIcon className="size-3 mr-1" />
@@ -539,6 +588,84 @@ export function ElementEditor({
                 className="h-8"
               />
               <span className="text-xs text-zinc-500">{localStyles.opacity || '1'}</span>
+            </div>
+          </TabsContent>
+
+          {/* Position Tab - NEW Figma-style positioning */}
+          <TabsContent value="position" className="m-0 p-3 space-y-4">
+            {/* Mode selector */}
+            <PositionModeSelector
+              value={positionMode}
+              onChange={setPositionMode}
+            />
+
+            <Separator className="bg-zinc-800" />
+
+            {/* Draggable Preview Canvas */}
+            <div className="flex justify-center">
+              <DraggablePreview
+                position={positionValues}
+                onPositionChange={handlePositionChange}
+                mode={positionMode}
+                gridSize={gridSize}
+                showGrid={true}
+              />
+            </div>
+
+            <Separator className="bg-zinc-800" />
+
+            {/* Position Controls */}
+            <PositionControls
+              values={positionValues}
+              onChange={handlePositionChange}
+              mode={positionMode}
+              gridSize={gridSize}
+            />
+
+            <Separator className="bg-zinc-800" />
+
+            {/* Grid Size Selector */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-zinc-400 flex items-center gap-1">
+                  <GridIcon className="size-3" />
+                  Grid Size
+                </Label>
+              </div>
+              <div className="flex gap-1">
+                {GRID_SIZES.map(size => (
+                  <Button
+                    key={size}
+                    variant={gridSize === size ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setGridSize(size)}
+                    className="h-6 px-2 text-xs flex-1"
+                  >
+                    {size}px
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tailwind Output */}
+            <div className="space-y-2">
+              <Label className="text-xs text-zinc-400">Generated Classes</Label>
+              <div className="flex items-center gap-2 bg-zinc-800/50 rounded-md p-2">
+                <code className="text-xs text-emerald-400 font-mono flex-1 truncate">
+                  {positionToTailwind(positionMode, positionValues).classes.join(' ') || 'No classes'}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  onClick={() => {
+                    const classes = positionToTailwind(positionMode, positionValues).classes.join(' ');
+                    navigator.clipboard.writeText(classes);
+                  }}
+                >
+                  <CopyIcon className="size-3" />
+                </Button>
+              </div>
             </div>
           </TabsContent>
 
@@ -852,69 +979,6 @@ export function ElementEditor({
                 placeholder="normal"
                 className="h-8 text-xs font-mono"
               />
-            </div>
-          </TabsContent>
-
-          {/* Code Tab */}
-          <TabsContent value="code" className="m-0 p-3 space-y-4">
-            {/* Selector */}
-            <div className="space-y-2">
-              <Label className="text-xs text-zinc-400">CSS Selector</Label>
-              <div className="p-2 bg-zinc-800 rounded-md font-mono text-xs text-blue-400 break-all">
-                {element.selector}
-              </div>
-            </div>
-
-            <Separator className="bg-zinc-800" />
-
-            {/* Generated CSS */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-zinc-400">Generated CSS</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleCopyCSS}
-                  className="h-6 px-2 text-xs"
-                >
-                  {copied ? (
-                    <CheckIcon className="size-3 mr-1 text-green-500" />
-                  ) : (
-                    <CopyIcon className="size-3 mr-1" />
-                  )}
-                  {copied ? 'Copied!' : 'Copy'}
-                </Button>
-              </div>
-              <pre className="p-3 bg-zinc-800 rounded-md font-mono text-xs text-zinc-300 overflow-x-auto">
-                {generateCSS()}
-              </pre>
-            </div>
-
-            <Separator className="bg-zinc-800" />
-
-            {/* Element Info */}
-            <div className="space-y-2">
-              <Label className="text-xs text-zinc-400">Element Info</Label>
-              <div className="p-2 bg-zinc-800 rounded-md space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">Tag:</span>
-                  <span className="font-mono text-zinc-300">{element.tagName}</span>
-                </div>
-                {element.id && (
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">ID:</span>
-                    <span className="font-mono text-zinc-300">#{element.id}</span>
-                  </div>
-                )}
-                {element.className && (
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Classes:</span>
-                    <span className="font-mono text-zinc-300 truncate max-w-[200px]">
-                      .{element.className.split(' ').join(' .')}
-                    </span>
-                  </div>
-                )}
-              </div>
             </div>
           </TabsContent>
 
