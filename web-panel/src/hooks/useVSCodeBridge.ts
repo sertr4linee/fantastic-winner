@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ModelsByVendor, WebSocketMessage, ChangeModelPayload, ChatMessage, WorkspaceInfo, NextJsProject, MCPServer, Activity } from '@/types';
+import { ModelsByVendor, WebSocketMessage, ChangeModelPayload, ChatMessage, WorkspaceInfo, NextJsProject, MCPServer, Activity, ActivityType } from '@/types';
 
 interface UseVSCodeBridgeReturn {
   models: ModelsByVendor;
@@ -307,6 +307,17 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               setIsDetectingMCP(false);
               break;
 
+            case 'domBridgeSetupComplete':
+              console.log('[Bridge] DOM Bridge setup complete:', message.payload);
+              // Refresh projects to update DOM selector status
+              wsRef.current?.send(JSON.stringify({ type: 'detectNextJsProjects' }));
+              break;
+
+            case 'domBridgeSetupError':
+              console.error('[Bridge] DOM Bridge setup error:', message.payload.error);
+              setError(message.payload.error);
+              break;
+
             // ============== Activity Tracking - Real-time events ==============
             case 'activity':
               const activity = message.payload as Activity;
@@ -327,11 +338,12 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               // Could add a toast notification here
               setActivities(prev => [{
                 id: `save-${Date.now()}`,
-                type: 'file-update',
-                name: 'Changes saved',
-                description: `Applied to ${message.payload?.file || 'source file'}`,
-                timestamp: new Date(),
-                duration: 0
+                type: 'file_modify' as ActivityType,
+                timestamp: Date.now(),
+                data: {
+                  path: message.payload?.file || 'source file',
+                  message: 'Changes saved successfully'
+                }
               }, ...prev].slice(0, 50));
               break;
               
@@ -340,11 +352,12 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               setError(message.payload?.error ?? 'Failed to apply changes');
               setActivities(prev => [{
                 id: `error-${Date.now()}`,
-                type: 'error',
-                name: 'Save failed',
-                description: message.payload?.error || 'Could not apply changes',
-                timestamp: new Date(),
-                duration: 0
+                type: 'diagnostic' as ActivityType,
+                timestamp: Date.now(),
+                data: {
+                  message: message.payload?.error || 'Could not apply changes',
+                  severity: 'error' as const
+                }
               }, ...prev].slice(0, 50));
               break;
               
@@ -585,6 +598,19 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     }));
   }, []);
 
+  const setupDOMBridge = useCallback((projectPath: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to VS Code extension');
+      return;
+    }
+
+    console.log('[setupDOMBridge] Setting up DOM Bridge for:', projectPath);
+    wsRef.current.send(JSON.stringify({
+      type: 'setupDOMBridge',
+      payload: { projectPath }
+    }));
+  }, []);
+
   const detectMCPServers = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to VS Code extension');
@@ -674,6 +700,8 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     startNextJsProject,
     stopNextJsProject,
     isDetectingProjects,
+    // DOM Bridge setup
+    setupDOMBridge,
     // MCP server management
     mcpServers,
     detectMCPServers,

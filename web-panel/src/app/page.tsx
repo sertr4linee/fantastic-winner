@@ -93,6 +93,8 @@ const Example = () => {
     startNextJsProject,
     stopNextJsProject,
     isDetectingProjects,
+    // DOM Bridge setup
+    setupDOMBridge,
     // MCP server management
     mcpServers,
     detectMCPServers,
@@ -655,6 +657,7 @@ const Example = () => {
                 onStopProject={handleStopNextJsProject}
                 onOpenPreview={handleOpenPreview}
                 onRefreshProjects={detectNextJsProjects}
+                onSetupDOMBridge={setupDOMBridge}
                 sendToCopilot={sendToCopilot}
                 isLoading={isDetectingProjects}
               />

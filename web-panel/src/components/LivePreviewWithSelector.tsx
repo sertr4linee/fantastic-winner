@@ -279,17 +279,22 @@ export function LivePreviewWithSelector({
   const getElementData = useCallback((): ElementData | null => {
     if (!selectedElement) return null;
     
-    const generateSelector = (el: ElementInfo): string => {
-      if (el.id) return `#${el.id}`;
-      if (el.className) {
-        const classes = el.className.split(' ').slice(0, 3).join('.');
-        return `${el.tagName}.${classes}`;
+    // Use the original selector from DOMSelectorBridge which includes the full path with nth-of-type
+    // This is critical for distinguishing between similar elements
+    const selector = selectedElement.path?.[0] || (() => {
+      // Fallback: generate a basic selector
+      if (selectedElement.id) return `#${selectedElement.id}`;
+      if (selectedElement.className) {
+        const classes = selectedElement.className.split(' ').slice(0, 3).join('.');
+        return `${selectedElement.tagName}.${classes}`;
       }
-      return el.tagName;
-    };
+      return selectedElement.tagName;
+    })();
+    
+    console.log('[LivePreview] Using selector:', selector);
     
     return {
-      selector: generateSelector(selectedElement),
+      selector,
       tagName: selectedElement.tagName,
       id: selectedElement.id,
       className: selectedElement.className,

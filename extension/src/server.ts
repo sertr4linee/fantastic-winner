@@ -1927,12 +1927,15 @@ export function DOMSelectorBridge() {
       targetTag, 
       targetId, 
       targetClasses,
-      nthIndex // Log the nth-of-type index
+      nthIndex
     });
 
     let hasChanges = false;
     let elementFound = false;
-    let matchCount = 0; // Track how many matches we've found
+    
+    // Track matches per parent to correctly handle nth-of-type
+    // This map tracks: parent path -> count of matches
+    const matchesByParent = new Map<string, number>();
 
     try {
       // Parse the JSX content into an AST
@@ -1942,7 +1945,6 @@ export function DOMSelectorBridge() {
       });
 
       // Traverse the AST to find and modify the target element
-      // Use JSXElement instead of JSXOpeningElement to have access to children
       babelTraverse(ast, {
         JSXElement: (path) => {
           // Only modify the first matching element
@@ -1952,9 +1954,9 @@ export function DOMSelectorBridge() {
           const elementName = t.isJSXIdentifier(openingElement.name) ? openingElement.name.name : null;
           
           if (!elementName) return;
-
-          // Check if this element matches our selector
-          let isMatch = false;
+          
+          // Skip if tag doesn't match
+          if (targetTag && elementName.toLowerCase() !== targetTag) return;
 
           // Get element attributes
           const attributes = openingElement.attributes.filter((attr): attr is t.JSXAttribute => 
@@ -1966,68 +1968,61 @@ export function DOMSelectorBridge() {
             const idAttr = attributes.find((attr: t.JSXAttribute) => 
               t.isJSXIdentifier(attr.name) && attr.name.name === 'id'
             );
-            if (idAttr && t.isStringLiteral(idAttr.value) && idAttr.value.value === targetId) {
-              isMatch = true;
+            if (!idAttr || !t.isStringLiteral(idAttr.value) || idAttr.value.value !== targetId) {
+              return;
             }
           }
 
           // Check for className match
-          if (!isMatch && targetClasses.length > 0) {
+          let classesMatch = false;
+          if (targetClasses.length > 0) {
             const classAttr = attributes.find((attr: t.JSXAttribute) => 
               t.isJSXIdentifier(attr.name) && attr.name.name === 'className'
             );
             if (classAttr && t.isStringLiteral(classAttr.value)) {
               const sourceClasses = classAttr.value.value.split(/\s+/).filter(c => c.length > 0);
               
-              // Check tag match first
-              const tagMatches = !targetTag || elementName.toLowerCase() === targetTag;
+              // Count how many target classes are in source
+              const matchingClasses = targetClasses.filter(tc => sourceClasses.includes(tc));
+              const matchRatio = matchingClasses.length / targetClasses.length;
               
-              if (tagMatches && sourceClasses.length > 0) {
-                // Strategy 1: Check if source classes are a subset of target classes
-                // This handles the case where DOM has MORE classes than source
-                const sourceInTarget = sourceClasses.filter(sc => targetClasses.includes(sc));
-                const matchRatio = sourceInTarget.length / sourceClasses.length;
-                
-                // Strategy 2: Check if target classes are in source (original logic)
-                const targetInSource = targetClasses.filter(tc => sourceClasses.includes(tc));
-                
-                console.log(`[Server] AST: Checking ${elementName} with classes: ${sourceClasses.join(', ')}`);
-                console.log(`[Server] AST: Target classes from selector: ${targetClasses.join(', ')}`);
-                console.log(`[Server] AST: Source->Target match: ${sourceInTarget.length}/${sourceClasses.length} (${(matchRatio * 100).toFixed(0)}%)`);
-                console.log(`[Server] AST: Target->Source match: ${targetInSource.length}/${targetClasses.length}`);
-                
-                // Match if:
-                // 1. Most source classes are in target (>= 70%) OR
-                // 2. Most target classes are in source (>= 70%) OR
-                // 3. At least 3 classes match on both sides
-                if (matchRatio >= 0.7 || 
-                    (targetInSource.length / targetClasses.length >= 0.7) ||
-                    (targetInSource.length >= 3 && sourceInTarget.length >= 3)) {
-                  isMatch = true;
-                  console.log(`[Server] AST: Matched by classes! Element: ${elementName}`);
-                }
+              // Also count how many source classes are in target (reverse match)
+              const reverseMatchingClasses = sourceClasses.filter(sc => targetClasses.includes(sc));
+              const reverseMatchRatio = sourceClasses.length > 0 ? reverseMatchingClasses.length / sourceClasses.length : 0;
+              
+              // Match if at least 50% of target classes are found in source
+              // OR if at least 3 classes match on both sides
+              if (matchRatio >= 0.5 || 
+                  (matchingClasses.length >= 3 && reverseMatchingClasses.length >= 2)) {
+                classesMatch = true;
+                console.log(`[Server] AST: Class match - ${matchingClasses.length}/${targetClasses.length} (${(matchRatio * 100).toFixed(0)}%) - matching: ${matchingClasses.join(', ')}`);
               }
             }
+          } else if (!targetId) {
+            // If no classes and no ID specified, match by tag only
+            classesMatch = true;
           }
-
-          // Check for tag match (if no id or class specified, or as fallback)
-          if (!isMatch && targetTag && elementName.toLowerCase() === targetTag && !targetId && targetClasses.length === 0) {
-            isMatch = true;
-          }
-
-          if (!isMatch) return;
-
-          // Increment match count for nth-of-type support
-          matchCount++;
-          console.log(`[Server] AST: Found potential match #${matchCount} (need #${nthIndex}): ${elementName}`);
           
-          // Only process if this is the nth match we're looking for
-          if (matchCount !== nthIndex) {
-            console.log(`[Server] AST: Skipping match #${matchCount}, looking for #${nthIndex}`);
+          if (!classesMatch && !targetId) return;
+
+          // Get parent path as identifier for nth-of-type counting
+          // We use the parent's start position as unique identifier
+          const parentPath = path.parentPath;
+          const parentKey = parentPath?.node?.start?.toString() || 'root';
+          
+          // Increment match count for this parent
+          const currentCount = (matchesByParent.get(parentKey) || 0) + 1;
+          matchesByParent.set(parentKey, currentCount);
+          
+          console.log(`[Server] AST: Found match for ${elementName} under parent ${parentKey}, count: ${currentCount}, need: ${nthIndex}`);
+          
+          // Only process if this is the nth match under this parent we're looking for
+          if (currentCount !== nthIndex) {
+            console.log(`[Server] AST: Skipping match #${currentCount}, looking for #${nthIndex}`);
             return;
           }
 
-          // Mark as found to stop after finding the correct nth match
+          // Mark as found
           elementFound = true;
           console.log(`[Server] AST: Found matching element #${nthIndex}: ${elementName}`);
 
