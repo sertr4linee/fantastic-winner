@@ -1061,8 +1061,10 @@ class AppBuilderServer {
             // Apply changes based on file type
             const ext = path.extname(sourceFile).toLowerCase();
             let newContent = null;
+            console.log(`[Server] File extension: ${ext}, applying changes...`);
             if (ext === '.tsx' || ext === '.jsx') {
                 newContent = await this.applyChangesToReactFile(content, selector, changes);
+                console.log(`[Server] applyChangesToReactFile returned: ${newContent ? 'new content' : 'null'}`);
             }
             else if (ext === '.css' || ext === '.scss' || ext === '.sass') {
                 newContent = await this.applyChangesToCssFile(content, selector, changes);
@@ -1092,10 +1094,14 @@ class AppBuilderServer {
             }
             else {
                 // Send a response indicating the element/styles couldn't be found
+                const errorMsg = newContent === null
+                    ? 'Could not find matching element in source file'
+                    : 'No changes detected (content unchanged)';
+                console.log(`[Server] Error: ${errorMsg}`);
                 this.sendToClient(ws, {
                     type: 'elementChangesError',
                     payload: {
-                        error: 'Could not find element in source file to modify',
+                        error: errorMsg,
                         selector,
                         file: sourceFile
                     }
@@ -1129,28 +1135,52 @@ class AppBuilderServer {
             for (const [projectPath, project] of this.nextJsProjects) {
                 if (project.port?.toString() === port) {
                     projectRoot = projectPath;
-                    console.log(`[Server] Found project by port: ${projectRoot}`);
+                    console.log(`[Server] Found project by port in nextJsProjects: ${projectRoot}`);
                     break;
                 }
             }
-            // If not found by port, search for Next.js projects in workspace
+            // If not found by port, try to detect which project is running on this port
             if (!projectRoot) {
+                console.log(`[Server] Port ${port} not found in tracked projects, scanning workspace...`);
                 const nextJsProjects = await this.findNextJsProjectsInWorkspace(rootPath);
-                if (nextJsProjects.length === 1) {
-                    projectRoot = nextJsProjects[0];
+                console.log(`[Server] Found ${nextJsProjects.length} Next.js projects:`, nextJsProjects);
+                // Try to find project by checking which one might be running on this port
+                // by looking at .next folder timestamps or package.json scripts
+                for (const proj of nextJsProjects) {
+                    const nextFolder = path.join(proj, '.next');
+                    if (fs.existsSync(nextFolder)) {
+                        // Check if dev-server is running for this project
+                        const appPage = path.join(proj, 'app', 'page.tsx');
+                        const srcAppPage = path.join(proj, 'src', 'app', 'page.tsx');
+                        if (fs.existsSync(appPage) || fs.existsSync(srcAppPage)) {
+                            // For now, use heuristics: if it's my-app and port is 3002, or web-panel and port is 3000
+                            const projectName = path.basename(proj);
+                            console.log(`[Server] Checking project: ${projectName}`);
+                            // Common port assignments
+                            if ((projectName === 'my-app' && (port === '3002' || port === '3001')) ||
+                                (projectName === 'web-panel' && port === '3000') ||
+                                projectName.includes('test') || projectName.includes('app')) {
+                                projectRoot = proj;
+                                console.log(`[Server] Selected project by name heuristic: ${projectRoot}`);
+                                break;
+                            }
+                        }
+                    }
                 }
-                else if (nextJsProjects.length > 1) {
-                    // Try to find the one running on this port
-                    // For now, use the first one that has an app/page.tsx
+                // If still not found, use the first project that has app/page.tsx
+                if (!projectRoot) {
                     for (const proj of nextJsProjects) {
                         const appPage = path.join(proj, 'app', 'page.tsx');
                         if (fs.existsSync(appPage)) {
                             projectRoot = proj;
+                            console.log(`[Server] Selected first project with app/page.tsx: ${projectRoot}`);
                             break;
                         }
                     }
-                    if (!projectRoot)
-                        projectRoot = nextJsProjects[0];
+                }
+                if (!projectRoot && nextJsProjects.length > 0) {
+                    projectRoot = nextJsProjects[0];
+                    console.log(`[Server] Fallback to first project: ${projectRoot}`);
                 }
             }
             // If still no project found, use workspace root
@@ -1303,13 +1333,26 @@ class AppBuilderServer {
      */
     async applyChangesToReactFile(content, selector, changes) {
         // Extract element info from selector
-        const tagMatch = selector.match(/^(\w+)/);
-        const idMatch = selector.match(/#([\w-]+)/);
-        const classMatch = selector.match(/\.(\w[\w-]*)/g);
+        // Handle complex selectors like "div > div > a.flex.h-12.w-full:nth-of-type(1)"
+        // We only care about the LAST part (the actual target element)
+        const selectorParts = selector.split(/\s*>\s*/);
+        const lastPart = selectorParts[selectorParts.length - 1].trim();
+        // Remove :nth-of-type() for matching
+        const cleanSelector = lastPart.replace(/:nth-of-type\(\d+\)/g, '');
+        const tagMatch = cleanSelector.match(/^(\w+)/);
+        const idMatch = cleanSelector.match(/#([\w-]+)/);
+        const classMatch = cleanSelector.match(/\.([\w-]+)/g);
         const targetTag = tagMatch?.[1]?.toLowerCase();
         const targetId = idMatch?.[1];
         const targetClasses = classMatch?.map(c => c.slice(1)) || [];
-        console.log(`[Server] AST: Parsed selector:`, { targetTag, targetId, targetClasses });
+        console.log(`[Server] AST: Parsed selector:`, {
+            originalSelector: selector,
+            lastPart,
+            cleanSelector,
+            targetTag,
+            targetId,
+            targetClasses
+        });
         let hasChanges = false;
         let elementFound = false;
         try {
@@ -1344,9 +1387,30 @@ class AppBuilderServer {
                     if (!isMatch && targetClasses.length > 0) {
                         const classAttr = attributes.find((attr) => t.isJSXIdentifier(attr.name) && attr.name.name === 'className');
                         if (classAttr && t.isStringLiteral(classAttr.value)) {
-                            const classNames = classAttr.value.value.split(/\s+/);
-                            if (targetClasses.some(tc => classNames.includes(tc))) {
-                                isMatch = true;
+                            const sourceClasses = classAttr.value.value.split(/\s+/).filter(c => c.length > 0);
+                            // Check tag match first
+                            const tagMatches = !targetTag || elementName.toLowerCase() === targetTag;
+                            if (tagMatches && sourceClasses.length > 0) {
+                                // Strategy 1: Check if source classes are a subset of target classes
+                                // This handles the case where DOM has MORE classes than source
+                                const sourceInTarget = sourceClasses.filter(sc => targetClasses.includes(sc));
+                                const matchRatio = sourceInTarget.length / sourceClasses.length;
+                                // Strategy 2: Check if target classes are in source (original logic)
+                                const targetInSource = targetClasses.filter(tc => sourceClasses.includes(tc));
+                                console.log(`[Server] AST: Checking ${elementName} with classes: ${sourceClasses.join(', ')}`);
+                                console.log(`[Server] AST: Target classes from selector: ${targetClasses.join(', ')}`);
+                                console.log(`[Server] AST: Source->Target match: ${sourceInTarget.length}/${sourceClasses.length} (${(matchRatio * 100).toFixed(0)}%)`);
+                                console.log(`[Server] AST: Target->Source match: ${targetInSource.length}/${targetClasses.length}`);
+                                // Match if:
+                                // 1. Most source classes are in target (>= 70%) OR
+                                // 2. Most target classes are in source (>= 70%) OR
+                                // 3. At least 3 classes match on both sides
+                                if (matchRatio >= 0.7 ||
+                                    (targetInSource.length / targetClasses.length >= 0.7) ||
+                                    (targetInSource.length >= 3 && sourceInTarget.length >= 3)) {
+                                    isMatch = true;
+                                    console.log(`[Server] AST: Matched by classes! Element: ${elementName}`);
+                                }
                             }
                         }
                     }

@@ -319,6 +319,32 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               });
               break;
             // ============== End Activity Tracking ==============
+            
+            case 'elementChangesApplied':
+              console.log('[Bridge] Element changes applied successfully:', message.payload);
+              // Could add a toast notification here
+              setActivities(prev => [{
+                id: `save-${Date.now()}`,
+                type: 'file-update',
+                name: 'Changes saved',
+                description: `Applied to ${message.payload?.file || 'source file'}`,
+                timestamp: new Date(),
+                duration: 0
+              }, ...prev].slice(0, 50));
+              break;
+              
+            case 'elementChangesError':
+              console.error('[Bridge] Element changes error:', message.payload);
+              setError(message.payload?.error ?? 'Failed to apply changes');
+              setActivities(prev => [{
+                id: `error-${Date.now()}`,
+                type: 'error',
+                name: 'Save failed',
+                description: message.payload?.error || 'Could not apply changes',
+                timestamp: new Date(),
+                duration: 0
+              }, ...prev].slice(0, 50));
+              break;
               
             case 'error':
               setError(message.payload?.message ?? 'Unknown error');

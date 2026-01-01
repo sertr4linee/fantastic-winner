@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,9 +16,15 @@ import {
   CopyIcon,
   CheckIcon,
   RotateCcwIcon,
-  SendIcon
+  SendIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  AlertCircleIcon,
+  SaveIcon,
+  FileCodeIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { cssToTailwind, mergeClasses, type FullConversionResult } from '@/lib/css-to-tailwind';
 
 export interface ElementStyles {
   // Layout
@@ -116,22 +122,51 @@ export function ElementEditor({
   const [localStyles, setLocalStyles] = useState<ElementStyles>({});
   const [localText, setLocalText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedTailwind, setCopiedTailwind] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const textDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const lastSelectorRef = useRef<string>('');
+  
+  // Store original values when element is selected
+  const originalStylesRef = useRef<ElementStyles>({});
+  const originalTextRef = useRef<string>('');
 
-  // Sync local state with element
+  // Tailwind conversion result
+  const tailwindResult = useMemo<FullConversionResult>(() => {
+    return cssToTailwind(localStyles as Record<string, string>);
+  }, [localStyles]);
+
+  // Merged classes (existing + new Tailwind)
+  const mergedClasses = useMemo(() => {
+    if (!element?.className) return tailwindResult.classes.join(' ');
+    return mergeClasses(element.className, tailwindResult.classes.join(' '));
+  }, [element?.className, tailwindResult.classes]);
+  
+  // Sync local state with element - only reset originals when selecting a NEW element
   useEffect(() => {
     if (element) {
-      setLocalStyles(element.styles || {});
-      // For complex elements (with children), prefer direct text content
-      // This avoids showing all nested text which would be confusing
-      const textToEdit = element.isComplexText && element.directTextContent 
-        ? element.directTextContent 
-        : (element.textContent || '');
-      setLocalText(textToEdit);
-      setHasChanges(false);
-      lastSelectorRef.current = element.selector;
+      const isNewElement = element.selector !== lastSelectorRef.current;
+      
+      if (isNewElement) {
+        // New element selected - reset everything
+        setLocalStyles(element.styles || {});
+        const textToEdit = element.isComplexText && element.directTextContent 
+          ? element.directTextContent 
+          : (element.textContent || '');
+        setLocalText(textToEdit);
+        setHasChanges(false);
+        setIsSaving(false);
+        lastSelectorRef.current = element.selector;
+        // Store original values ONLY for new elements
+        originalStylesRef.current = { ...element.styles };
+        originalTextRef.current = textToEdit;
+        console.log('[ElementEditor] New element selected:', element.selector, 'Original text:', textToEdit);
+      } else {
+        // Same element updated (e.g., after preview update) - DON'T reset originals
+        // Just update styles from element but keep tracking changes
+        console.log('[ElementEditor] Same element updated, keeping original refs');
+      }
     }
   }, [element]);
 
@@ -166,14 +201,17 @@ export function ElementEditor({
   }, [element, onTextChange]);
 
   const handleApplyToCode = useCallback(() => {
-    if (!element) return;
+    if (!element) {
+      console.log('[ElementEditor] No element selected');
+      return;
+    }
     
     const changes: ElementChanges = {};
     
-    // Compare styles
+    // Compare styles with ORIGINAL values (not current element which might have been updated)
     const styleChanges: Partial<ElementStyles> = {};
     for (const [key, value] of Object.entries(localStyles)) {
-      if (value !== element.styles[key as keyof ElementStyles]) {
+      if (value !== originalStylesRef.current[key as keyof ElementStyles]) {
         styleChanges[key as keyof ElementStyles] = value;
       }
     }
@@ -181,14 +219,31 @@ export function ElementEditor({
       changes.styles = styleChanges;
     }
     
-    // Compare text
-    if (localText !== element.textContent) {
+    // Compare text with ORIGINAL value
+    if (localText !== originalTextRef.current) {
       changes.textContent = localText;
     }
     
+    console.log('[ElementEditor] Applying to code:', { 
+      selector: element.selector, 
+      changes,
+      localText,
+      originalText: originalTextRef.current,
+      hasTextChange: localText !== originalTextRef.current
+    });
+    
     if (Object.keys(changes).length > 0) {
+      setIsSaving(true);
       onApplyToCode(element.selector, changes);
-      setHasChanges(false);
+      // Update original refs since we've saved
+      originalStylesRef.current = { ...localStyles };
+      originalTextRef.current = localText;
+      setTimeout(() => {
+        setIsSaving(false);
+        setHasChanges(false);
+      }, 1000);
+    } else {
+      console.log('[ElementEditor] No changes to apply');
     }
   }, [element, localStyles, localText, onApplyToCode]);
 
@@ -289,6 +344,10 @@ export function ElementEditor({
           <TabsTrigger value="code" className="text-xs data-[state=active]:bg-zinc-800">
             <CodeIcon className="size-3 mr-1" />
             Code
+          </TabsTrigger>
+          <TabsTrigger value="export" className="text-xs data-[state=active]:bg-zinc-800">
+            <SparklesIcon className="size-3 mr-1" />
+            Export
           </TabsTrigger>
         </TabsList>
 
@@ -802,8 +861,177 @@ export function ElementEditor({
               </div>
             </div>
           </TabsContent>
+
+          {/* Export Tab - CSS to Tailwind */}
+          <TabsContent value="export" className="m-0 p-3 space-y-4">
+            {/* Tailwind Classes Preview */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-zinc-400">Tailwind Classes</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(tailwindResult.classes.join(' '));
+                    setCopiedTailwind(true);
+                    setTimeout(() => setCopiedTailwind(false), 2000);
+                  }}
+                  className="h-6 px-2 text-xs"
+                >
+                  {copiedTailwind ? (
+                    <CheckIcon className="size-3 mr-1 text-green-500" />
+                  ) : (
+                    <CopyIcon className="size-3 mr-1" />
+                  )}
+                  {copiedTailwind ? 'Copied!' : 'Copy'}
+                </Button>
+              </div>
+              <div className="p-3 bg-zinc-800 rounded-md font-mono text-xs text-emerald-400 break-all">
+                {tailwindResult.classes.length > 0 
+                  ? tailwindResult.classes.join(' ')
+                  : <span className="text-zinc-500 italic">No styles to convert</span>
+                }
+              </div>
+            </div>
+
+            <Separator className="bg-zinc-800" />
+
+            {/* Merged with existing classes */}
+            {element.className && (
+              <>
+                <div className="space-y-2">
+                  <Label className="text-xs text-zinc-400">Merged with Existing Classes</Label>
+                  <div className="p-3 bg-zinc-800 rounded-md font-mono text-xs text-blue-400 break-all">
+                    {mergedClasses}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(`className="${mergedClasses}"`);
+                      setCopiedTailwind(true);
+                      setTimeout(() => setCopiedTailwind(false), 2000);
+                    }}
+                    className="w-full h-7 text-xs"
+                  >
+                    <CopyIcon className="size-3 mr-1" />
+                    Copy Merged className
+                  </Button>
+                </div>
+                <Separator className="bg-zinc-800" />
+              </>
+            )}
+
+            {/* Conversion Details */}
+            <div className="space-y-2">
+              <Label className="text-xs text-zinc-400">Conversion Details</Label>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {tailwindResult.conversions.map((conv, idx) => (
+                  <div 
+                    key={idx}
+                    className="flex items-center gap-2 p-2 bg-zinc-800/50 rounded text-xs"
+                  >
+                    {conv.exact ? (
+                      <CheckCircleIcon className="size-3 text-green-500 shrink-0" />
+                    ) : (
+                      <AlertCircleIcon className="size-3 text-amber-500 shrink-0" />
+                    )}
+                    <span className="text-zinc-500 truncate">{conv.property}:</span>
+                    <span className="text-zinc-400 truncate">{conv.originalValue}</span>
+                    <span className="text-zinc-600">→</span>
+                    <span className="text-emerald-400 font-mono truncate">{conv.tailwindClass}</span>
+                  </div>
+                ))}
+                {tailwindResult.conversions.length === 0 && (
+                  <div className="text-xs text-zinc-500 italic p-2">
+                    No inline styles to convert
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Unconverted properties */}
+            {tailwindResult.unconverted.length > 0 && (
+              <>
+                <Separator className="bg-zinc-800" />
+                <div className="space-y-2">
+                  <Label className="text-xs text-amber-400">⚠️ Not Converted</Label>
+                  <div className="space-y-1">
+                    {tailwindResult.unconverted.map((item, idx) => (
+                      <div 
+                        key={idx}
+                        className="flex items-center gap-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-xs"
+                      >
+                        <span className="text-zinc-400">{item.property}:</span>
+                        <span className="text-zinc-300 font-mono truncate">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <Separator className="bg-zinc-800" />
+
+            {/* Stats */}
+            <div className="flex items-center gap-4 text-xs text-zinc-500">
+              <div className="flex items-center gap-1">
+                <CheckCircleIcon className="size-3 text-green-500" />
+                <span>{tailwindResult.conversions.filter(c => c.exact).length} exact</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <AlertCircleIcon className="size-3 text-amber-500" />
+                <span>{tailwindResult.conversions.filter(c => !c.exact).length} approximate</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-zinc-600">{tailwindResult.unconverted.length} skipped</span>
+              </div>
+            </div>
+          </TabsContent>
         </div>
       </Tabs>
+
+      {/* Fixed bottom action bar - Save to File */}
+      {hasChanges && (
+        <div className="shrink-0 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <FileCodeIcon className="size-4 text-blue-400" />
+              <span>Unsaved changes</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleReset}
+                className="h-8 px-3 text-xs"
+              >
+                <RotateCcwIcon className="size-3 mr-1" />
+                Reset
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleApplyToCode}
+                disabled={isSaving}
+                className="h-8 px-4 text-xs bg-green-600 hover:bg-green-700 text-white font-medium"
+              >
+                {isSaving ? (
+                  <>
+                    <CheckIcon className="size-3 mr-1 animate-pulse" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <SaveIcon className="size-3 mr-1" />
+                    Save to File
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
