@@ -67,7 +67,8 @@ import {
   MessageSquare,
   ServerIcon,
   FileCodeIcon,
-  ActivityIcon
+  ActivityIcon,
+  ChevronDown
 } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
@@ -563,7 +564,8 @@ const Example = () => {
                         <ModelSelectorTrigger asChild>
                           <PromptInputButton 
                             disabled={loading}
-                            className="min-w-45 justify-start"
+                            className="w-auto justify-start"
+                            size="sm"
                           >
                             {loading ? (
                               <RefreshCwIcon className="size-4 animate-spin" />
@@ -575,9 +577,13 @@ const Example = () => {
                                 <ModelSelectorName className="flex-1 text-left">
                                   {selectedModel.id}
                                 </ModelSelectorName>
+                                <ChevronDown className="ml-2 size-4 text-muted-foreground" />
                               </>
                             ) : (
-                              <span>Select Model</span>
+                              <>
+                                <span>Select Model</span>
+                                <ChevronDown className="ml-2 size-4 text-muted-foreground" />
+                              </>
                             )}
                           </PromptInputButton>
                         </ModelSelectorTrigger>
