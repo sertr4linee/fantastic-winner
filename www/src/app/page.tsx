@@ -41,10 +41,6 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
-import {
-  Message,
-  MessageContent,
-} from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { ToastProvider } from "@/components/ui/toast";
 import { FileTree } from "@/components/FileTree";
@@ -58,12 +54,9 @@ import {
   RefreshCwIcon, 
   FolderIcon, 
   AlertCircleIcon,
-  WifiIcon,
-  WifiOffIcon,
   StopCircleIcon,
   TrashIcon,
   Bot,
-  User,
   SparklesIcon,
   LayoutDashboard,
   MessageSquare,
@@ -71,9 +64,7 @@ import {
   FileCodeIcon,
   ActivityIcon,
   ChevronDown,
-  CommandIcon,
-  SettingsIcon,
-  LogOutIcon
+  SettingsIcon
 } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
@@ -89,9 +80,7 @@ const Example = () => {
     sendToCopilot,
     messages,
     isStreaming,
-    isBuilderStreaming, // Utiliser isBuilderStreaming au lieu de isCopilotStreaming
-    copilotResponse,
-    copilotChatOpened,
+    isBuilderStreaming,
     workspacePath,
     fileTree,
     // Next.js project management
@@ -153,7 +142,7 @@ const Example = () => {
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, copilotResponse]);
+  }, [messages]);
 
   // Update status based on builder streaming (TRUE Copilot response)
   useEffect(() => {
@@ -216,7 +205,6 @@ const Example = () => {
   };
 
   const clearMessages = () => {
-    // TODO: Implement clear messages in useVSCodeBridge
     window.location.reload();
   };
 

@@ -33,13 +33,10 @@ interface UseVSCodeBridgeReturn {
   selectedModel: ChangeModelPayload | null;
   changeModel: (model: ChangeModelPayload) => Promise<boolean>;
   refreshModels: () => void;
-  sendMessage: (message: string) => void;
   sendToCopilot: (prompt: string) => void;
   messages: ChatMessage[];
   isStreaming: boolean;
-  isCopilotStreaming: boolean;
-  copilotResponse: string;
-  copilotChatOpened: boolean;
+  isBuilderStreaming: boolean;
   workspacePath: string;
   fileTree: WorkspaceInfo['fileTree'];
   // Next.js project management
@@ -54,11 +51,6 @@ interface UseVSCodeBridgeReturn {
   mcpServers: MCPServer[];
   detectMCPServers: () => void;
   isDetectingMCP: boolean;
-  // @builder - TRUE Copilot Chat UI capture
-  sendToBuilder: (prompt: string) => void;
-  builderResponse: string;
-  isBuilderStreaming: boolean;
-  builderMessages: ChatMessage[];
   // Activity tracking - real-time events
   activities: Activity[];
   clearActivities: () => void;
@@ -92,21 +84,13 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
   const [selectedModel, setSelectedModel] = useState<ChangeModelPayload | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [isCopilotStreaming, setIsCopilotStreaming] = useState(false);
-  const [copilotResponse, setCopilotResponse] = useState<string>('');
-  const [copilotChatOpened, setCopilotChatOpened] = useState(false);
+  const [isBuilderStreaming, setIsBuilderStreaming] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string>('');
   const [fileTree, setFileTree] = useState<WorkspaceInfo['fileTree']>({});
   const [nextJsProjects, setNextJsProjects] = useState<NextJsProject[]>([]);
   const [isDetectingProjects, setIsDetectingProjects] = useState(false);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [isDetectingMCP, setIsDetectingMCP] = useState(false);
-  
-  // @builder states - TRUE Copilot Chat capture
-  const [builderResponse, setBuilderResponse] = useState<string>('');
-  const [isBuilderStreaming, setIsBuilderStreaming] = useState(false);
-  const [builderMessages, setBuilderMessages] = useState<ChatMessage[]>([]);
-  const builderStreamRef = useRef<string>('');
   
   // Activity tracking - real-time events
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -126,7 +110,6 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingRequestsRef = useRef<Map<string, (success: boolean) => void>>(new Map());
   const currentStreamRef = useRef<string>('');
-  const copilotStreamRef = useRef<string>('');
   const isConnectingRef = useRef(false);
   
   // Helper pour ajouter une activité avec ID unique et limite de taille
@@ -310,22 +293,18 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               
             case 'copilotChatOpened':
               console.log('[Bridge] Copilot Chat opened');
-              setCopilotChatOpened(true);
               break;
               
             case 'copilotWord':
               // Recevoir chaque mot individuellement
               const word = message.payload.word;
               console.log('[Bridge] Received word:', JSON.stringify(word));
-              copilotStreamRef.current += word;
-              console.log('[Bridge] Current stream:', copilotStreamRef.current);
-              setCopilotResponse(copilotStreamRef.current);
-              // Mettre à jour aussi le dernier message assistant
+              // Mettre à jour le dernier message assistant
               setMessages(prev => {
                 const last = prev[prev.length - 1];
                 console.log('[Bridge] Last message:', last);
                 if (last && last.role === 'assistant') {
-                  const updated = { ...last, content: copilotStreamRef.current };
+                  const updated = { ...last, content: (last.content || '') + word };
                   console.log('[Bridge] Updating assistant message:', updated);
                   return [
                     ...prev.slice(0, -1),
@@ -339,69 +318,32 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               
             case 'copilotComplete':
               console.log('[Bridge] Copilot response complete');
-              console.log('[Bridge] Final response:', copilotStreamRef.current);
-              setIsCopilotStreaming(false);
               break;
               
             case 'copilotError':
               console.error('[Bridge] Copilot error:', message.payload.error);
-              setIsCopilotStreaming(false);
+              setIsBuilderStreaming(false);
               setError(message.payload.error);
               break;
 
             // ============== @builder - TRUE Copilot Chat UI capture ==============
             case 'builderPromptReceived':
               console.log('[Bridge] @builder received prompt:', message.payload.prompt);
-              // Ajouter le message user aux builderMessages
-              setBuilderMessages(prev => [
-                ...prev,
-                {
-                  id: message.payload.requestId || `user-${Date.now()}`,
-                  role: 'user',
-                  content: message.payload.prompt,
-                  timestamp: Date.now()
-                }
-              ]);
-              // Préparer un message assistant vide pour le streaming
-              setBuilderMessages(prev => [
-                ...prev,
-                {
-                  id: `assistant-${Date.now()}`,
-                  role: 'assistant',
-                  content: '',
-                  timestamp: Date.now()
-                }
-              ]);
               setIsBuilderStreaming(true);
-              builderStreamRef.current = '';
               break;
 
             case 'builderResponseChunk':
               // Streaming chunk depuis @builder (vraie réponse Copilot!)
               const builderChunk = message.payload.chunk;
               console.log('[Bridge] @builder chunk:', builderChunk.length, 'chars');
-              builderStreamRef.current += builderChunk;
-              setBuilderResponse(builderStreamRef.current);
               
-              // Mettre à jour le dernier message assistant dans builderMessages
-              setBuilderMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.role === 'assistant') {
-                  return [
-                    ...prev.slice(0, -1),
-                    { ...last, content: builderStreamRef.current }
-                  ];
-                }
-                return prev;
-              });
-              
-              // Mettre à jour AUSSI le dernier message dans messages[] pour l'affichage principal
+              // Mettre à jour le dernier message dans messages[] pour l'affichage
               setMessages(prev => {
                 const last = prev[prev.length - 1];
                 if (last && last.role === 'assistant') {
                   return [
                     ...prev.slice(0, -1),
-                    { ...last, content: builderStreamRef.current }
+                    { ...last, content: (last.content || '') + builderChunk }
                   ];
                 }
                 return prev;
@@ -409,9 +351,8 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               break;
 
             case 'builderResponseComplete':
-              console.log('[Bridge] @builder complete:', message.payload.fullResponse?.length || builderStreamRef.current.length, 'chars');
+              console.log('[Bridge] @builder complete');
               setIsBuilderStreaming(false);
-              // La réponse complète est maintenant visible dans messages[] et builderMessages[]
               break;
 
             case 'builderResponseError':
@@ -605,50 +546,8 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     }
   }, []);
 
-  const sendMessage = useCallback((message: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected to VS Code extension');
-      return;
-    }
-
-    const requestId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Ajouter le message utilisateur
-    const userMessage: ChatMessage = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      content: message,
-      timestamp: Date.now()
-    };
-    
-    setMessages(prev => [...prev, userMessage]);
-    
-    // Préparer le message assistant (vide pour l'instant)
-    const assistantMessage: ChatMessage = {
-      id: requestId,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now()
-    };
-    
-    setMessages(prev => [...prev, assistantMessage]);
-    setIsStreaming(true);
-    currentStreamRef.current = '';
-
-    wsRef.current.send(JSON.stringify({
-      type: 'sendMessage',
-      payload: { message },
-      requestId
-    }));
-  }, []);
-
   const sendToCopilot = useCallback((prompt: string) => {
     console.log('[sendToCopilot] Called with prompt:', prompt);
-    console.log('[sendToCopilot] Redirecting to @builder for TRUE Copilot response...');
-    
-    // ⚠️ IMPORTANT: Utiliser sendToBuilder pour capturer la vraie réponse de Copilot!
-    // sendToCopilot utilise vscode.lm qui retourne toujours "vscode.lm"
-    // @builder capture la réponse réelle du Chat UI de Copilot
     
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[sendToCopilot] WebSocket not connected');
@@ -671,9 +570,6 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
       timestamp: Date.now()
     };
     setMessages(prev => [...prev, userMessage]);
-    
-    // Ajouter aussi aux builderMessages pour tracking
-    setBuilderMessages(prev => [...prev, userMessage]);
 
     // Préparer le message assistant vide pour le streaming
     const assistantMessage: ChatMessage = {
@@ -683,11 +579,6 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
       timestamp: Date.now()
     };
     setMessages(prev => [...prev, assistantMessage]);
-    setBuilderMessages(prev => [...prev, assistantMessage]);
-    
-    // Réinitialiser le stream
-    builderStreamRef.current = '';
-    setBuilderResponse('');
 
     const messageToSend = {
       type: 'sendToBuilder',
@@ -761,38 +652,8 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
   }, []);
 
   /**
-   * Envoie un prompt au Chat Participant @builder
-   * Ceci capture les vraies réponses du Copilot Chat UI!
+   * Clear activities
    */
-  const sendToBuilder = useCallback((prompt: string) => {
-    console.log('[sendToBuilder] Called with prompt:', prompt);
-    
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('[sendToBuilder] WebSocket not connected');
-      setError('Not connected to VS Code extension');
-      return;
-    }
-
-    const requestId = `builder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    console.log('[sendToBuilder] Generated requestId:', requestId);
-    
-    // Réinitialiser l'état Builder
-    setBuilderResponse('');
-    builderStreamRef.current = '';
-    setIsBuilderStreaming(true);
-    setError(null);
-
-    const messageToSend = {
-      type: 'sendToBuilder',
-      payload: { prompt, requestId },
-      requestId
-    };
-    
-    console.log('[sendToBuilder] Sending to @builder via WebSocket');
-    wsRef.current.send(JSON.stringify(messageToSend));
-  }, []);
-
-  // Clear activities
   const clearActivities = useCallback(() => {
     setActivities([]);
   }, []);
@@ -906,13 +767,10 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     selectedModel,
     changeModel,
     refreshModels,
-    sendMessage,
     sendToCopilot,
     messages,
     isStreaming,
-    isCopilotStreaming,
-    copilotResponse,
-    copilotChatOpened,
+    isBuilderStreaming,
     workspacePath,
     fileTree,
     // Next.js project management
@@ -927,11 +785,6 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     mcpServers,
     detectMCPServers,
     isDetectingMCP,
-    // @builder - TRUE Copilot Chat capture
-    sendToBuilder,
-    builderResponse,
-    isBuilderStreaming,
-    builderMessages,
     // Activity tracking - real-time events
     activities,
     clearActivities,

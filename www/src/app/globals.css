@@ -80,11 +80,5 @@
   scrollbar-color: theme('colors.zinc.800') transparent;
 }
 
-.gradient-button {
-  background: linear-gradient(82.3deg, #2d79ff 10.8%, #2a48f4 94.3%);
-}
 
-.gradient-button-variant {
-  background: linear-gradient(82.3deg, #464646 10.8%, #18181b 94.3%);
-}
 
