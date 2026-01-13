@@ -41,6 +41,34 @@
       {
         "command": "aiAppBuilder.showSidebar",
         "title": "AI App Builder: Show Sidebar"
+      },
+      {
+        "command": "aiAppBuilder.startPanel",
+        "title": "AI App Builder: Start Panel",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aiAppBuilder.stopPanel",
+        "title": "AI App Builder: Stop Panel",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "aiAppBuilder.restartPanel",
+        "title": "AI App Builder: Restart Panel",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiAppBuilder.showPanelLogs",
+        "title": "AI App Builder: Show Panel Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "aiAppBuilder.clearPanelLogs",
+        "title": "AI App Builder: Clear Panel Logs"
+      },
+      {
+        "command": "aiAppBuilder.panelQuickActions",
+        "title": "AI App Builder: Panel Quick Actions"
       }
     ],
     "viewsContainers": {
@@ -76,12 +104,32 @@
         "aiAppBuilder.serverPort": {
           "type": "number",
           "default": 57129,
-          "description": "Port for the local AI App Builder server"
+          "description": "Port for the local AI App Builder server (WebSocket)"
         },
         "aiAppBuilder.autoOpen": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically open the panel on activation"
+          "description": "Automatically open the panel in browser on activation"
+        },
+        "aiAppBuilder.panelPort": {
+          "type": "number",
+          "default": 3001,
+          "description": "Port for the Next.js panel"
+        },
+        "aiAppBuilder.panelAutoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the panel when the extension activates"
+        },
+        "aiAppBuilder.panelMode": {
+          "type": "string",
+          "enum": ["development", "production"],
+          "default": "development",
+          "enumDescriptions": [
+            "Run 'npm run dev' for hot reload during development",
+            "Run 'npm run start' with pre-built files for production"
+          ],
+          "description": "Panel mode: development (hot reload) or production (pre-built)"
         }
       }
     }
