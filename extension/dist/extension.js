@@ -40,6 +40,7 @@ const server_1 = require("./server");
 const modelBridge_1 = require("./modelBridge");
 const chatParticipant_1 = require("./chatParticipant");
 const sidebarProvider_1 = require("./sidebarProvider");
+const processManager_1 = require("./processManager");
 let server;
 async function activate(context) {
     console.log('[AI App Builder] Extension activating...');
@@ -142,9 +143,29 @@ async function activate(context) {
         }
     });
     context.subscriptions.push(openPanelCmd, listModelsCmd, changeModelCmd);
+    // Commande: Process Manager Stats
+    const processStatsCmd = vscode.commands.registerCommand('aiAppBuilder.processStats', async () => {
+        const processManager = processManager_1.ProcessManager.getInstance(context);
+        const stats = await processManager.getStats();
+        const info = [
+            '📊 Process Manager Statistics',
+            '',
+            `Registered Ports: ${stats.registeredPorts.join(', ') || 'None'}`,
+            '',
+            'Active Processes:',
+            ...stats.usedPorts.map(p => `  - Port ${p.port}: ${p.pids.length} process(es) (PIDs: ${p.pids.join(', ')})`),
+            stats.usedPorts.length === 0 ? '  (No active processes)' : ''
+        ].join('\n');
+        const choice = await vscode.window.showInformationMessage(info, { modal: true }, 'Cleanup All', 'Close');
+        if (choice === 'Cleanup All') {
+            await processManager.cleanup();
+            vscode.window.showInformationMessage('✨ All processes cleaned up!');
+        }
+    });
+    context.subscriptions.push(processStatsCmd);
     // Démarrer le serveur
     try {
-        server = new server_1.AppBuilderServer(port);
+        server = new server_1.AppBuilderServer(port, context);
         const url = await server.start();
         vscode.window.showInformationMessage(`🚀 AI App Builder running at ${url}`, 'Open Panel').then(selection => {
             if (selection === 'Open Panel') {
@@ -169,6 +190,7 @@ function deactivate() {
         server.stop();
     }
     modelBridge_1.ModelBridge.getInstance().dispose();
+    // Le ProcessManager sera nettoyé automatiquement via context.subscriptions
     console.log('[AI App Builder] Deactivated');
 }
 //# sourceMappingURL=extension.js.map

@@ -46,13 +46,14 @@ import { ToastProvider } from "@/components/ui/toast";
 import { FileTree } from "@/components/FileTree";
 import { NextJsProjectManager } from "@/components/NextJsProjectManager";
 import { MCPServerManager } from "@/components/MCPServerManager";
+import CopilotHistoryViewer from "@/components/CopilotHistoryViewer";
 import { LivePreviewWithSelector } from "@/components/LivePreviewWithSelector";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { useVSCodeBridge } from "@/hooks/useVSCodeBridge";
-import { 
-  CheckIcon, 
-  RefreshCwIcon, 
-  FolderIcon, 
+import {
+  CheckIcon,
+  RefreshCwIcon,
+  FolderIcon,
   AlertCircleIcon,
   StopCircleIcon,
   TrashIcon,
@@ -64,7 +65,8 @@ import {
   FileCodeIcon,
   ActivityIcon,
   ChevronDown,
-  SettingsIcon
+  SettingsIcon,
+  HistoryIcon
 } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
@@ -97,10 +99,18 @@ const Example = () => {
     isDetectingMCP,
     // Activity tracking - real-time events
     activities,
-    clearActivities
+    clearActivities,
+    // Copilot History
+    copilotConversations,
+    copilotHistoryConfig,
+    availableCopilotVersions,
+    getCopilotHistory,
+    getCopilotHistoryConfig,
+    updateCopilotHistoryConfig,
+    getAvailableCopilotVersions
   } = useVSCodeBridge();
 
-  const [activeTab, setActiveTab] = useState<"chat" | "projects" | "files" | "mcp" | "activity">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "projects" | "files" | "mcp" | "activity" | "history">("chat");
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -305,6 +315,7 @@ const Example = () => {
                 { id: 'files', label: 'Files', icon: FileCodeIcon },
                 { id: 'mcp', label: 'MCP Servers', icon: ServerIcon },
                 { id: 'activity', label: 'Activity', icon: ActivityIcon },
+                { id: 'history', label: 'Copilot History', icon: HistoryIcon },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -740,6 +751,23 @@ const Example = () => {
                       onClear={clearActivities}
                     />
                   </div>
+                </div>
+              )}
+
+              {/* COPILOT HISTORY TAB */}
+              {activeTab === "history" && (
+                <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <CopilotHistoryViewer 
+                    sendMessage={(type, payload) => {
+                      if (type === 'getCopilotHistory') getCopilotHistory();
+                      else if (type === 'getCopilotHistoryConfig') getCopilotHistoryConfig();
+                      else if (type === 'updateCopilotHistoryConfig') updateCopilotHistoryConfig(payload);
+                      else if (type === 'getAvailableCopilotVersions') getAvailableCopilotVersions();
+                    }}
+                    conversations={copilotConversations}
+                    config={copilotHistoryConfig}
+                    availableVersions={availableCopilotVersions}
+                  />
                 </div>
               )}
 

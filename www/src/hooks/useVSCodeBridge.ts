@@ -5,6 +5,31 @@ import { ModelsByVendor, WebSocketMessage, ChangeModelPayload, ChatMessage, Work
 import { RealmClient, ConnectionState } from '@/realm/RealmClient';
 import type { RealmID, RealmEvent, ElementStyles as RealmElementStyles } from '@/realm/types';
 
+// Types Copilot History
+interface CopilotMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: number;
+}
+
+interface CopilotConversation {
+  id: string;
+  title: string;
+  timestamp: number;
+  messages: CopilotMessage[];
+  filePath: string;
+}
+
+interface CopilotHistoryConfig {
+  version: 'stable' | 'insiders';
+  maxConversations: number;
+}
+
+interface AvailableCopilotVersions {
+  stable: boolean;
+  insiders: boolean;
+}
+
 // ============================================================================
 // REALM Integration
 // ============================================================================
@@ -75,6 +100,16 @@ interface UseVSCodeBridgeReturn {
   rollbackRealmChanges: (realmId: RealmID) => void;
   /** Get REALM client instance for advanced usage */
   getRealmClient: () => RealmClient;
+  // ============================================================================
+  // Copilot History
+  // ============================================================================
+  copilotConversations: CopilotConversation[];
+  copilotHistoryConfig: CopilotHistoryConfig | null;
+  availableCopilotVersions: AvailableCopilotVersions | null;
+  getCopilotHistory: () => void;
+  getCopilotHistoryConfig: () => void;
+  updateCopilotHistoryConfig: (config: Partial<CopilotHistoryConfig>) => void;
+  getAvailableCopilotVersions: () => void;
 }
 
 export function useVSCodeBridge(): UseVSCodeBridgeReturn {
@@ -105,6 +140,13 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
   const [realmConnectionState, setRealmConnectionState] = useState<ConnectionState>('disconnected');
   const [selectedRealmElement, setSelectedRealmElement] = useState<RealmID | null>(null);
   const realmClientRef = useRef<RealmClient | null>(null);
+  
+  // ============================================================================
+  // Copilot History State
+  // ============================================================================
+  const [copilotConversations, setCopilotConversations] = useState<CopilotConversation[]>([]);
+  const [copilotHistoryConfig, setCopilotHistoryConfig] = useState<CopilotHistoryConfig | null>(null);
+  const [availableCopilotVersions, setAvailableCopilotVersions] = useState<AvailableCopilotVersions | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -386,6 +428,22 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
               console.log('[Bridge] MCP servers detected:', message.payload.servers);
               setMcpServers(message.payload.servers);
               setIsDetectingMCP(false);
+              break;
+
+            // ============== Copilot History ==============
+            case 'copilotHistory':
+              console.log('[Bridge] Copilot history received:', message.payload.conversations.length, 'conversations');
+              setCopilotConversations(message.payload.conversations);
+              break;
+
+            case 'copilotHistoryConfig':
+              console.log('[Bridge] Copilot history config:', message.payload);
+              setCopilotHistoryConfig(message.payload);
+              break;
+
+            case 'availableCopilotVersions':
+              console.log('[Bridge] Available Copilot versions:', message.payload);
+              setAvailableCopilotVersions(message.payload);
               break;
 
             case 'domBridgeSetupComplete':
@@ -760,6 +818,41 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     return realmClientRef.current;
   }, []);
 
+  // ============================================================================
+  // Copilot History Methods
+  // ============================================================================
+  const getCopilotHistory = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to VS Code extension');
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ type: 'getCopilotHistory' }));
+  }, []);
+
+  const getCopilotHistoryConfigFn = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to VS Code extension');
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ type: 'getCopilotHistoryConfig' }));
+  }, []);
+
+  const updateCopilotHistoryConfig = useCallback((config: Partial<CopilotHistoryConfig>) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to VS Code extension');
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ type: 'updateCopilotHistoryConfig', payload: config }));
+  }, []);
+
+  const getAvailableCopilotVersionsFn = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to VS Code extension');
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ type: 'getAvailableCopilotVersions' }));
+  }, []);
+
   return {
     models,
     isConnected,
@@ -801,5 +894,15 @@ export function useVSCodeBridge(): UseVSCodeBridgeReturn {
     commitRealmChanges,
     rollbackRealmChanges,
     getRealmClient: getRealmClientInstance,
+    // ============================================================================
+    // Copilot History
+    // ============================================================================
+    copilotConversations,
+    copilotHistoryConfig,
+    availableCopilotVersions,
+    getCopilotHistory,
+    getCopilotHistoryConfig: getCopilotHistoryConfigFn,
+    updateCopilotHistoryConfig,
+    getAvailableCopilotVersions: getAvailableCopilotVersionsFn,
   };
 }

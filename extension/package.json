@@ -35,6 +35,10 @@
         "title": "AI App Builder: Change Active Model"
       },
       {
+        "command": "aiAppBuilder.processStats",
+        "title": "AI App Builder: Show Process Statistics"
+      },
+      {
         "command": "aiAppBuilder.showSidebar",
         "title": "AI App Builder: Show Sidebar"
       }

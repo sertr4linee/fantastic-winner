@@ -9,6 +9,7 @@ import { ModelBridge } from './modelBridge';
 import { ChatParticipantBridge } from './chatParticipant';
 import { ActivityTracker } from './activityTracker';
 import { CopilotHistoryService } from './copilotHistory';
+import { ProcessManager } from './processManager';
 import { WebSocketMessage, ChangeModelPayload, WorkspaceInfo, FileTreeItem, NextJsProject } from './types';
 
 // REALM Protocol imports
@@ -33,6 +34,7 @@ export class AppBuilderServer {
   private modelBridge: ModelBridge;
   private activityTracker: ActivityTracker;
   private copilotHistoryService: CopilotHistoryService;
+  private processManager: ProcessManager;
   private port: number;
   private nextJsProjects: Map<string, NextJsProject> = new Map();
   private nextJsProcesses: Map<string, ChildProcess> = new Map();
@@ -43,10 +45,22 @@ export class AppBuilderServer {
   private wsClientMap: Map<WebSocket, string> = new Map(); // ws -> clientId
 
   constructor(port: number, private context: vscode.ExtensionContext) {
+    console.log('[Server] Initializing AppBuilderServer...');
     this.port = port;
     this.modelBridge = ModelBridge.getInstance();
     this.activityTracker = ActivityTracker.getInstance();
-    this.copilotHistoryService = CopilotHistoryService.getInstance(context);
+    this.processManager = ProcessManager.getInstance(context);
+    
+    // Initialize CopilotHistoryService with error handling
+    try {
+      console.log('[Server] Initializing CopilotHistoryService...');
+      this.copilotHistoryService = CopilotHistoryService.getInstance(context);
+      console.log('[Server] CopilotHistoryService initialized:', !!this.copilotHistoryService);
+    } catch (error) {
+      console.error('[Server] ERROR initializing CopilotHistoryService:', error);
+      throw error;
+    }
+    
     this.syncEngine = SyncEngine.getInstance();
     this.realmEventBus = EventBus.getInstance();
     this.app = express();
@@ -60,6 +74,7 @@ export class AppBuilderServer {
     this.setupChatParticipantBridge();
     this.setupActivityTracker();
     this.setupRealmEventHandlers();
+    console.log('[Server] AppBuilderServer initialized successfully');
   }
   
   /**
@@ -92,10 +107,12 @@ export class AppBuilderServer {
   }
 
   private setupMiddleware(): void {
+    console.log('[Server] Setting up middleware...');
     this.app.use(express.json());
     
     // CORS pour le panel Next.js
     this.app.use((req, res, next) => {
+      console.log(`[Server] ${req.method} ${req.url}`);
       res.header('Access-Control-Allow-Origin', '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -104,16 +121,21 @@ export class AppBuilderServer {
       }
       next();
     });
+    console.log('[Server] Middleware configured');
   }
 
   private setupRoutes(): void {
+    console.log('[Server] Setting up routes...');
+    
     // Health check
     this.app.get('/api/health', (req, res) => {
+      console.log('[Server] Health check called');
       res.json({ status: 'ok', timestamp: Date.now() });
     });
 
     // Liste des modèles (API REST fallback)
     this.app.get('/api/models', async (req, res) => {
+      console.log('[Server] Models API called');
       try {
         const models = await this.modelBridge.getModelsByVendor();
         res.json({ success: true, data: models });
@@ -339,18 +361,22 @@ export class AppBuilderServer {
         break;
 
       case 'getCopilotHistory':
+        console.log('[Server] Received getCopilotHistory request');
         await this.handleGetCopilotHistory(ws);
         break;
 
       case 'getCopilotHistoryConfig':
+        console.log('[Server] Received getCopilotHistoryConfig request');
         await this.handleGetCopilotHistoryConfig(ws);
         break;
 
       case 'updateCopilotHistoryConfig':
+        console.log('[Server] Received updateCopilotHistoryConfig request');
         await this.handleUpdateCopilotHistoryConfig(ws, message.payload);
         break;
 
       case 'getAvailableCopilotVersions':
+        console.log('[Server] Received getAvailableCopilotVersions request');
         await this.handleGetAvailableCopilotVersions(ws);
         break;
 
@@ -869,6 +895,22 @@ export class AppBuilderServer {
       return;
     }
 
+    // ✅ Vérifier si le port est disponible
+    const isPortFree = await this.processManager.isPortAvailable(port);
+    if (!isPortFree) {
+      console.log(`[Server] Port ${port} is busy, finding alternative...`);
+      try {
+        port = await this.processManager.findAvailablePort(port, 20);
+        console.log(`[Server] Using alternative port: ${port}`);
+      } catch (error) {
+        this.sendToClient(ws, {
+          type: 'nextJsProjectStatus',
+          payload: { path: projectPath, status: 'error', error: `No available port found starting from ${port}` }
+        });
+        return;
+      }
+    }
+
     // Update status to starting
     project.status = 'starting';
     project.port = port;
@@ -886,7 +928,69 @@ export class AppBuilderServer {
       const hasBunLock = fs.existsSync(path.join(projectPath, 'bun.lockb')) || 
                          fs.existsSync(path.join(projectPath, 'bun.lock'));
       
+      const hasNodeModules = fs.existsSync(path.join(projectPath, 'node_modules'));
       const homeDir = process.env.HOME || '/Users/moneyprinter';
+      
+      // ✅ Installer les dépendances si nécessaire
+      if (!hasNodeModules) {
+        console.log(`[Server] node_modules not found, installing dependencies...`);
+        
+        this.sendToClient(ws, {
+          type: 'nextJsProjectStatus',
+          payload: { path: projectPath, status: 'installing' }
+        });
+
+        let installCommand: string;
+        if (hasBunLock) {
+          installCommand = `"${homeDir}/.bun/bin/bun" install`;
+        } else if (hasPnpmLock) {
+          installCommand = `pnpm install`;
+        } else if (hasYarnLock) {
+          installCommand = `yarn install`;
+        } else {
+          installCommand = `npm install`;
+        }
+
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const installProcess = spawn('/bin/zsh', ['-c', installCommand], {
+              cwd: projectPath,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: { ...process.env, HOME: homeDir }
+            });
+
+            installProcess.stdout?.on('data', (data) => {
+              console.log(`[Install ${project.name}] ${data.toString()}`);
+            });
+
+            installProcess.stderr?.on('data', (data) => {
+              console.error(`[Install ${project.name}] ${data.toString()}`);
+            });
+
+            installProcess.on('error', reject);
+            installProcess.on('exit', (code) => {
+              if (code === 0) {
+                resolve();
+              } else {
+                reject(new Error(`Installation failed with code ${code}`));
+              }
+            });
+          });
+
+          console.log(`[Server] Dependencies installed successfully`);
+        } catch (error) {
+          console.error(`[Server] Failed to install dependencies:`, error);
+          project.status = 'error';
+          project.error = `Failed to install dependencies: ${error}`;
+          this.nextJsProjects.set(projectPath, project);
+          
+          this.sendToClient(ws, {
+            type: 'nextJsProjectStatus',
+            payload: { path: projectPath, status: 'error', error: project.error }
+          });
+          return;
+        }
+      }
       
       // Build the full command with absolute paths
       let fullCommand: string;
@@ -947,6 +1051,16 @@ export class AppBuilderServer {
           this.broadcastToAll({
             type: 'nextJsProjectStatus',
             payload: { path: projectPath, status: 'running', port }
+          });
+
+          // ✅ Notification VS Code
+          vscode.window.showInformationMessage(
+            `✅ ${project.name} is running on http://localhost:${port}`,
+            'Open in Browser'
+          ).then(selection => {
+            if (selection === 'Open in Browser') {
+              vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}`));
+            }
           });
         }
       });
@@ -1053,6 +1167,94 @@ export class AppBuilderServer {
   }
 
   // ============== End Next.js Project Management ==============
+
+  // ============== Copilot History ==============
+
+  /**
+   * Gère la récupération de l'historique Copilot
+   */
+  private async handleGetCopilotHistory(ws: WebSocket): Promise<void> {
+    try {
+      console.log('[Server] Getting Copilot history...');
+      const conversations = await this.copilotHistoryService.getRecentConversations();
+      
+      this.sendToClient(ws, {
+        type: 'copilotHistory',
+        payload: { conversations }
+      });
+      
+      console.log(`[Server] Sent ${conversations.length} conversations`);
+    } catch (error) {
+      console.error('[Server] Error getting Copilot history:', error);
+      this.sendToClient(ws, {
+        type: 'error',
+        payload: { message: 'Failed to get Copilot history', error: String(error) }
+      });
+    }
+  }
+
+  /**
+   * Gère la récupération de la configuration de l'historique
+   */
+  private async handleGetCopilotHistoryConfig(ws: WebSocket): Promise<void> {
+    try {
+      const config = this.copilotHistoryService.getConfig();
+      this.sendToClient(ws, {
+        type: 'copilotHistoryConfig',
+        payload: config
+      });
+    } catch (error) {
+      console.error('[Server] Error getting Copilot history config:', error);
+      this.sendToClient(ws, {
+        type: 'error',
+        payload: { message: 'Failed to get config', error: String(error) }
+      });
+    }
+  }
+
+  /**
+   * Gère la mise à jour de la configuration de l'historique
+   */
+  private async handleUpdateCopilotHistoryConfig(ws: WebSocket, payload: any): Promise<void> {
+    try {
+      await this.copilotHistoryService.updateConfig(payload);
+      const updatedConfig = this.copilotHistoryService.getConfig();
+      
+      this.sendToClient(ws, {
+        type: 'copilotHistoryConfig',
+        payload: updatedConfig
+      });
+      
+      console.log('[Server] Updated Copilot history config:', updatedConfig);
+    } catch (error) {
+      console.error('[Server] Error updating Copilot history config:', error);
+      this.sendToClient(ws, {
+        type: 'error',
+        payload: { message: 'Failed to update config', error: String(error) }
+      });
+    }
+  }
+
+  /**
+   * Gère la récupération des versions disponibles (stable/insiders)
+   */
+  private async handleGetAvailableCopilotVersions(ws: WebSocket): Promise<void> {
+    try {
+      const versions = await this.copilotHistoryService.getAvailableVersions();
+      this.sendToClient(ws, {
+        type: 'availableCopilotVersions',
+        payload: versions
+      });
+    } catch (error) {
+      console.error('[Server] Error getting available versions:', error);
+      this.sendToClient(ws, {
+        type: 'error',
+        payload: { message: 'Failed to get available versions', error: String(error) }
+      });
+    }
+  }
+
+  // ============== End Copilot History ==============
 
   // ============== MCP Server Detection ==============
 
@@ -2677,6 +2879,22 @@ export function DOMSelectorBridge() {
   // ============== End Element Change Application ==============
 
   public async start(): Promise<string> {
+    // Vérifier et réserver le port avec ProcessManager
+    try {
+      console.log(`[Server] Checking port ${this.port} availability...`);
+      this.port = await this.processManager.reservePort(this.port, true);
+      console.log(`[Server] Port ${this.port} reserved`);
+    } catch (error) {
+      console.error('[Server] Failed to reserve port:', error);
+      throw error;
+    }
+
+    // Enregistrer le callback de nettoyage
+    this.processManager.registerCleanup(async () => {
+      console.log('[Server] ProcessManager cleanup callback triggered');
+      this.stop();
+    });
+
     return new Promise((resolve, reject) => {
       this.server.listen(this.port, '127.0.0.1', () => {
         const url = `http://127.0.0.1:${this.port}`;
@@ -2686,6 +2904,7 @@ export function DOMSelectorBridge() {
 
       this.server.on('error', (error: NodeJS.ErrnoException) => {
         if (error.code === 'EADDRINUSE') {
+          console.error(`[Server] Port ${this.port} is already in use`);
           reject(new Error(`Port ${this.port} is already in use`));
         } else {
           reject(error);
@@ -2695,17 +2914,50 @@ export function DOMSelectorBridge() {
   }
 
   public stop(): void {
+    console.log('[Server] Stopping server...');
+    
     // Stop all Next.js processes
     for (const [projectPath, child] of this.nextJsProcesses) {
       console.log(`[Server] Stopping Next.js project at ${projectPath}`);
-      child.kill('SIGTERM');
+      try {
+        child.kill('SIGTERM');
+        // Force kill si toujours en vie après 2s
+        setTimeout(() => {
+          if (!child.killed) {
+            console.log(`[Server] Force killing Next.js project at ${projectPath}`);
+            child.kill('SIGKILL');
+          }
+        }, 2000);
+      } catch (error) {
+        console.error(`[Server] Error stopping Next.js project at ${projectPath}:`, error);
+      }
     }
     this.nextJsProcesses.clear();
 
-    this.clients.forEach(client => client.close());
+    // Close WebSocket connections
+    this.clients.forEach(client => {
+      try {
+        client.close();
+      } catch (error) {
+        console.error('[Server] Error closing WebSocket client:', error);
+      }
+    });
     this.clients.clear();
-    this.wss.close();
-    this.server.close();
+    
+    // Close WebSocket server
+    try {
+      this.wss.close();
+    } catch (error) {
+      console.error('[Server] Error closing WebSocket server:', error);
+    }
+    
+    // Close HTTP server
+    try {
+      this.server.close();
+    } catch (error) {
+      console.error('[Server] Error closing HTTP server:', error);
+    }
+    
     console.log('[Server] Server stopped');
   }
 

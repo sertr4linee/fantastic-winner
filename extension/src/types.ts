@@ -59,7 +59,10 @@ export interface WebSocketMessage {
     // Element editing - apply changes to source code
     | 'applyElementChanges' | 'elementChangesApplied' | 'elementChangesError' | 'fileModified'
     // REALM Protocol
-    | 'realm_event';
+    | 'realm_event'
+    // Copilot History
+    | 'getCopilotHistory' | 'copilotHistory' | 'getCopilotHistoryConfig' | 'copilotHistoryConfig' 
+    | 'updateCopilotHistoryConfig' | 'getAvailableCopilotVersions' | 'availableCopilotVersions';
   payload?: any;
   requestId?: string;
 }
@@ -70,7 +73,7 @@ export interface NextJsProject {
   packageJsonPath: string;
   hasNextConfig: boolean;
   port: number;
-  status: 'stopped' | 'starting' | 'running' | 'error';
+  status: 'stopped' | 'starting' | 'installing' | 'running' | 'error';
   error?: string;
 }
 
@@ -97,4 +100,28 @@ export interface SendMessagePayload {
 export interface ServerConfig {
   httpPort: number;
   wsPort: number;
+}
+
+export interface CopilotConversation {
+  id: string;
+  title: string;
+  timestamp: number;
+  messages: CopilotMessage[];
+  filePath: string;
+}
+
+export interface CopilotMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: number;
+}
+
+export interface CopilotHistoryConfig {
+  version: 'stable' | 'insiders';
+  maxConversations: number;
+}
+
+export interface AvailableCopilotVersions {
+  stable: boolean;
+  insiders: boolean;
 }

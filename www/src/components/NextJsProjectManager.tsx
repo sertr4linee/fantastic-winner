@@ -19,7 +19,7 @@ export interface NextJsProject {
   packageJsonPath: string;
   hasNextConfig: boolean;
   port: number;
-  status: "stopped" | "starting" | "running" | "error";
+  status: "stopped" | "starting" | "installing" | "running" | "error";
   error?: string;
 }
 
@@ -52,6 +52,8 @@ export function NextJsProjectManager({
         return <CheckCircle2Icon className="size-4 text-green-500" />;
       case "starting":
         return <Loader2Icon className="size-4 text-yellow-500 animate-spin" />;
+      case "installing":
+        return <Loader2Icon className="size-4 text-blue-500 animate-spin" />;
       case "error":
         return <XCircleIcon className="size-4 text-red-500" />;
       default:
@@ -65,6 +67,8 @@ export function NextJsProjectManager({
         return "Running";
       case "starting":
         return "Starting...";
+      case "installing":
+        return "Installing dependencies...";
       case "error":
         return "Error";
       default:

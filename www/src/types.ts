@@ -57,7 +57,10 @@ export interface WebSocketMessage {
     // DOM Bridge setup
     | 'setupDOMBridge' | 'domBridgeSetupComplete' | 'domBridgeSetupError'
     // MCP servers
-    | 'detectMCPServers' | 'mcpServersDetected';
+    | 'detectMCPServers' | 'mcpServersDetected'
+    // Copilot History
+    | 'getCopilotHistory' | 'copilotHistory' | 'getCopilotHistoryConfig' | 'copilotHistoryConfig' 
+    | 'updateCopilotHistoryConfig' | 'getAvailableCopilotVersions' | 'availableCopilotVersions';
   payload?: any;
   requestId?: string;
 }
@@ -99,7 +102,7 @@ export interface NextJsProject {
   packageJsonPath: string;
   hasNextConfig: boolean;
   port: number;
-  status: 'stopped' | 'starting' | 'running' | 'error';
+  status: 'stopped' | 'starting' | 'installing' | 'running' | 'error';
   error?: string;
 }
 

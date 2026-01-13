@@ -3,6 +3,7 @@ import { AppBuilderServer } from './server';
 import { ModelBridge } from './modelBridge';
 import { ChatParticipantBridge } from './chatParticipant';
 import { SidebarProvider } from './sidebarProvider';
+import { ProcessManager } from './processManager';
 
 let server: AppBuilderServer | undefined;
 
@@ -129,9 +130,38 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(openPanelCmd, listModelsCmd, changeModelCmd);
 
+  // Commande: Process Manager Stats
+  const processStatsCmd = vscode.commands.registerCommand('aiAppBuilder.processStats', async () => {
+    const processManager = ProcessManager.getInstance(context);
+    const stats = await processManager.getStats();
+    
+    const info = [
+      '📊 Process Manager Statistics',
+      '',
+      `Registered Ports: ${stats.registeredPorts.join(', ') || 'None'}`,
+      '',
+      'Active Processes:',
+      ...stats.usedPorts.map(p => `  - Port ${p.port}: ${p.pids.length} process(es) (PIDs: ${p.pids.join(', ')})`),
+      stats.usedPorts.length === 0 ? '  (No active processes)' : ''
+    ].join('\n');
+    
+    const choice = await vscode.window.showInformationMessage(
+      info,
+      { modal: true },
+      'Cleanup All', 'Close'
+    );
+    
+    if (choice === 'Cleanup All') {
+      await processManager.cleanup();
+      vscode.window.showInformationMessage('✨ All processes cleaned up!');
+    }
+  });
+
+  context.subscriptions.push(processStatsCmd);
+
   // Démarrer le serveur
   try {
-    server = new AppBuilderServer(port);
+    server = new AppBuilderServer(port, context);
     const url = await server.start();
     
     vscode.window.showInformationMessage(
@@ -166,5 +196,6 @@ export function deactivate() {
   
   ModelBridge.getInstance().dispose();
   
+  // Le ProcessManager sera nettoyé automatiquement via context.subscriptions
   console.log('[AI App Builder] Deactivated');
 }
